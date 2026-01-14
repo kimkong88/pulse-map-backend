@@ -1,0 +1,23 @@
+model Report {
+    id        String       @id @default(uuid())
+    type      ReportType
+    status    ReportStatus
+    code      String       @unique
+    data      Json
+    input     Json
+    createdAt DateTime     @default(now())
+    updatedAt DateTime     @updatedAt
+}
+
+enum ReportType {
+    personal
+    compatibility
+    forecast
+}
+
+enum ReportStatus {
+    pending
+    in_progress
+    completed
+    failed
+}
