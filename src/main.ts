@@ -2,7 +2,6 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import cookieParser from 'cookie-parser';
-import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
 import { Logger, ValidationPipe } from '@nestjs/common';
@@ -96,12 +95,13 @@ async function bootstrap() {
 
     logger.log(`🌐 CORS allowed origins: ${allowedOrigins.join(', ')}`);
 
-    app.use(
-      cors({
-        origin: allowedOrigins,
-        credentials: true,
-      }),
-    );
+    // Use NestJS built-in CORS instead of middleware
+    app.enableCors({
+      origin: allowedOrigins,
+      credentials: true,
+      methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+    });
 
     app.enableShutdownHooks();
 
