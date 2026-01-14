@@ -28,6 +28,34 @@ async function bootstrap() {
 
     const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
+    // CORS must be enabled FIRST, before any other middleware
+    const allowedOrigins = [
+      'https://pulse-map-frontend.vercel.app',
+      'https://www.pulse-map-frontend.vercel.app',
+      'https://pulsemap.app',
+      'https://www.pulsemap.app',
+    ];
+
+    if (process.env.NODE_ENV === 'development') {
+      allowedOrigins.push('http://localhost:3000');
+    }
+
+    logger.log(`🌐 CORS allowed origins: ${allowedOrigins.join(', ')}`);
+
+    app.enableCors({
+      origin: allowedOrigins,
+      credentials: true,
+      methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+      preflightContinue: false,
+      optionsSuccessStatus: 204,
+    });
+
+    // Trust proxy (Railway, Vercel, etc.) - must be set early
+    if (process.env.NODE_ENV === 'production') {
+      app.set('trust proxy', 1);
+    }
+
     // const redisAdapter = new RedisIoAdapter(app);
 
     // Wait for Redis to be fully initialized
@@ -52,6 +80,7 @@ async function bootstrap() {
           },
         },
         crossOriginEmbedderPolicy: false, // For Swagger UI
+        crossOriginResourcePolicy: false, // CRITICAL: Allow CORS
       }),
     );
 
@@ -76,32 +105,7 @@ async function bootstrap() {
       }),
     );
 
-    if (process.env.NODE_ENV === 'production') {
-      app.set('trust proxy', 1);
-    }
-
     app.use(cookieParser());
-
-    const allowedOrigins = [
-      'https://pulse-map-frontend.vercel.app',
-      'https://www.pulse-map-frontend.vercel.app',
-      'https://pulsemap.app',
-      'https://www.pulsemap.app',
-    ];
-
-    if (process.env.NODE_ENV === 'development') {
-      allowedOrigins.push('http://localhost:3000');
-    }
-
-    logger.log(`🌐 CORS allowed origins: ${allowedOrigins.join(', ')}`);
-
-    // Use NestJS built-in CORS instead of middleware
-    app.enableCors({
-      origin: allowedOrigins,
-      credentials: true,
-      methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
-    });
 
     app.enableShutdownHooks();
 
