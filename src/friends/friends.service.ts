@@ -7,7 +7,7 @@ import * as friendsRepository from '../repositories/friends.repository';
 import { AddFriendDto } from './friends.dto';
 import { User } from '../../prisma/generated/prisma/client';
 import * as usersRepository from '../repositories/users.repository';
-import { UsersService } from 'src/users/users.service';
+import { UsersService } from '../users/users.service';
 import { SajuService } from '../saju/saju.service';
 import { toDate } from 'date-fns-tz';
 

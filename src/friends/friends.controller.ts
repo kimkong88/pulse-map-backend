@@ -1,8 +1,17 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from "@nestjs/common";
-import { FriendsService } from "./friends.service";
-import { UserContext } from "../decorators/userContext";
-import { AuthGuard } from "src/guards/authGuard";
-import { AddFriendDto, UpdateFriendRelationshipDto } from "./friends.dto";
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
+import { FriendsService } from './friends.service';
+import { UserContext } from '../decorators/userContext';
+import { AuthGuard } from '../guards/authGuard';
+import { AddFriendDto, UpdateFriendRelationshipDto } from './friends.dto';
 
 @Controller('friends')
 export class FriendsController {
@@ -10,7 +19,10 @@ export class FriendsController {
 
   @UseGuards(AuthGuard)
   @Post()
-  addFriend(@UserContext() userContext: { user: { id: string } }, @Body() addFriendDto: AddFriendDto) {
+  addFriend(
+    @UserContext() userContext: { user: { id: string } },
+    @Body() addFriendDto: AddFriendDto,
+  ) {
     return this.friendsService.addFriend(userContext.user.id, addFriendDto);
   }
 
@@ -36,7 +48,10 @@ export class FriendsController {
 
   @UseGuards(AuthGuard)
   @Delete(':id')
-  deleteFriend(@UserContext() userContext: { user: { id: string } }, @Param('id') id: string) {
+  deleteFriend(
+    @UserContext() userContext: { user: { id: string } },
+    @Param('id') id: string,
+  ) {
     return this.friendsService.removeFriend(userContext.user.id, id);
   }
 }
