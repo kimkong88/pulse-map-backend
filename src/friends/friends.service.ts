@@ -1,11 +1,15 @@
-import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
-import * as friendsRepository from "../repositories/friends.repository";
-import { AddFriendDto } from "./friends.dto";
-import { User } from "prisma/generated/prisma/client";
-import * as usersRepository from "../repositories/users.repository";
-import { UsersService } from "src/users/users.service";
-import { SajuService } from "../saju/saju.service";
-import { toDate } from "date-fns-tz";
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import * as friendsRepository from '../repositories/friends.repository';
+import { AddFriendDto } from './friends.dto';
+import { User } from '../../prisma/generated/prisma/client';
+import * as usersRepository from '../repositories/users.repository';
+import { UsersService } from 'src/users/users.service';
+import { SajuService } from '../saju/saju.service';
+import { toDate } from 'date-fns-tz';
 
 @Injectable()
 export class FriendsService {
@@ -19,12 +23,12 @@ export class FriendsService {
     if (!friendRelationship) {
       throw new NotFoundException('friend_not_found');
     }
-    
+
     // Verify the relationship belongs to the current user
     if (friendRelationship.userId !== userId) {
       throw new BadRequestException('friend_does_not_belong_to_user');
     }
-    
+
     return friendsRepository.removeFriend(friendId);
   }
 
@@ -38,21 +42,22 @@ export class FriendsService {
     if (!friendRelationship) {
       throw new NotFoundException('friend_not_found');
     }
-    
+
     // Verify the relationship belongs to the current user
     if (friendRelationship.userId !== userId) {
       throw new BadRequestException('friend_does_not_belong_to_user');
     }
-    
+
     // Update the relationship
     await friendsRepository.updateFriendRelationship(friendId, relationship);
-    
+
     // Return the updated friend in the same format as getFriends
-    const updatedRelationship = await friendsRepository.findFriendById(friendId);
+    const updatedRelationship =
+      await friendsRepository.findFriendById(friendId);
     if (!updatedRelationship) {
       throw new NotFoundException('friend_not_found');
     }
-    
+
     return this.buildFriendObject(userId, updatedRelationship);
   }
 
@@ -106,23 +111,24 @@ export class FriendsService {
     );
 
     // Calculate daily compatibility (adjusts base score based on today's energy)
-    const dailyCompatibility = await this.sajuService.calculateDailyCompatibility(
-      {
-        birthDateTime: currentUserBirthDate,
-        gender: currentUser.gender,
-        birthTimezone: currentUser.birthTimezone,
-        isTimeKnown: currentUser.isTimeKnown,
-      },
-      {
-        birthDateTime: friendBirthDate,
-        gender: friendUser.gender,
-        birthTimezone: friendUser.birthTimezone,
-        isTimeKnown: friendUser.isTimeKnown,
-      },
-      baseScore,
-      relationship.relationship,
-      currentUser.currentTimezone || currentUser.birthTimezone,
-    );
+    const dailyCompatibility =
+      await this.sajuService.calculateDailyCompatibility(
+        {
+          birthDateTime: currentUserBirthDate,
+          gender: currentUser.gender,
+          birthTimezone: currentUser.birthTimezone,
+          isTimeKnown: currentUser.isTimeKnown,
+        },
+        {
+          birthDateTime: friendBirthDate,
+          gender: friendUser.gender,
+          birthTimezone: friendUser.birthTimezone,
+          isTimeKnown: friendUser.isTimeKnown,
+        },
+        baseScore,
+        relationship.relationship,
+        currentUser.currentTimezone || currentUser.birthTimezone,
+      );
 
     return {
       id: relationship.id,
@@ -152,9 +158,8 @@ export class FriendsService {
   }
 
   async getFriends(userId: string) {
-    const friendRelationships = await friendsRepository.findFriendsByUserId(
-      userId,
-    );
+    const friendRelationships =
+      await friendsRepository.findFriendsByUserId(userId);
 
     const friends = await Promise.all(
       friendRelationships.map(async (relationship) => {
@@ -164,11 +169,12 @@ export class FriendsService {
 
     return friends;
   }
-  
+
   async addFriend(userId: string, addFriendDto: AddFriendDto) {
     let friend: User;
     const MAX_FRIENDS = 10;
-    const currentUserFriends = await friendsRepository.findFriendsByUserId(userId);
+    const currentUserFriends =
+      await friendsRepository.findFriendsByUserId(userId);
     if (currentUserFriends.length >= MAX_FRIENDS) {
       throw new BadRequestException('maximum_friends_reached');
     }

@@ -6,7 +6,7 @@ import {
   IsISO8601,
   IsOptional,
 } from 'class-validator';
-import { Gender } from 'prisma/generated/prisma/enums';
+import { Gender } from '../../prisma/generated/prisma/enums';
 
 export class SwitchUserDto {
   @IsString()

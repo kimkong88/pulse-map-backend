@@ -1,5 +1,15 @@
-import { IsBoolean, IsEnum, IsISO8601, IsOptional, IsString, Matches } from "class-validator";
-import { FriendRelationShip, Gender } from "prisma/generated/prisma/client";
+import {
+  IsBoolean,
+  IsEnum,
+  IsISO8601,
+  IsOptional,
+  IsString,
+  Matches,
+} from 'class-validator';
+import {
+  FriendRelationShip,
+  Gender,
+} from '../../prisma/generated/prisma/client';
 
 export class AddFriendDto {
   @IsString()

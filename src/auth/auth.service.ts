@@ -1,4 +1,4 @@
-import { Platform } from 'prisma/generated/prisma/enums';
+import { Platform } from '../../prisma/generated/prisma/enums';
 import { AuthenticateDto } from './auth.dto';
 import {
   BadRequestException,
@@ -10,9 +10,9 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import * as accountsRepository from '../repositories/accounts.repository';
 import * as usersRepository from '../repositories/users.repository';
-import { Account, User } from 'prisma/generated/prisma/client';
+import { Account, User } from '../../prisma/generated/prisma/client';
 import { TokensService } from '../tokens/tokens.service';
-import { TokenType } from 'prisma/generated/prisma/enums';
+import { TokenType } from '../../prisma/generated/prisma/enums';
 
 @Injectable()
 export class AuthService {

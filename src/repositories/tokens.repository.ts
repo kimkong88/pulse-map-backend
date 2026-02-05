@@ -1,5 +1,5 @@
 import { prisma } from '../prisma/client';
-import { TokenType } from 'prisma/generated/prisma/enums';
+import { TokenType } from '../../prisma/generated/prisma/enums';
 
 export const createToken = async (
   token: string,

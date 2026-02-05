@@ -10,7 +10,7 @@ import * as reportsRepository from '../repositories/reports.repository';
 import { SajuService } from '../saju/saju.service';
 import { toDate } from 'date-fns-tz';
 import { generateRandomString } from '../utils/string';
-import { Prisma } from 'prisma/generated/prisma/client';
+import { Prisma } from '../../prisma/generated/prisma/client';
 import { BaziCalculator } from '@aharris02/bazi-calculator-by-alvamind';
 import { BaziDataExtractor } from '../saju/utils/baziExtractor.util';
 import { getElementEmoji } from '../forecast/utils/elementEmojis.config';
@@ -58,9 +58,12 @@ export class MeService {
     }
     const userContext = BaziDataExtractor.buildUserContext(baseAnalysis);
     const identity = this.sajuService.generateIdentity(userContext);
-    const whoYouAre = this.sajuService.getWhoYouAreContent(identity.code, userContext);
+    const whoYouAre = this.sajuService.getWhoYouAreContent(
+      identity.code,
+      userContext,
+    );
     const dayMasterElement = `${identity.element}-${identity.polarity === 'Yin' ? 'I' : 'O'}`;
-    
+
     // Get element emoji
     const elementEmoji = getElementEmoji(identity.element as any);
 

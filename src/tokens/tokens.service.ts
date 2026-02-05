@@ -2,7 +2,7 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { add } from 'date-fns';
 import * as tokensRepository from '../repositories/tokens.repository';
-import { TokenType } from 'prisma/generated/prisma/enums';
+import { TokenType } from '../../prisma/generated/prisma/enums';
 
 @Injectable()
 export class TokensService {

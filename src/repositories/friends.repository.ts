@@ -1,5 +1,8 @@
-import { Prisma, FriendRelationShip } from "prisma/generated/prisma/client";
-import { prisma } from "../prisma/client";
+import {
+  Prisma,
+  FriendRelationShip,
+} from '../../prisma/generated/prisma/client';
+import { prisma } from '../prisma/client';
 
 export const addFriend = async (data: Prisma.FriendCreateInput) => {
   const friend = await prisma.friend.create({

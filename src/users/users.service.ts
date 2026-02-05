@@ -1,9 +1,14 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { CreateUserDto } from './users.dto';
 import * as usersRepository from '../repositories/users.repository';
 import * as blessingsRepository from '../repositories/blessings.repository';
 import { TokensService } from '../tokens/tokens.service';
-import { User } from 'prisma/generated/prisma/client';
+import { User } from '../../prisma/generated/prisma/client';
 import { generateRandomString } from '../utils/string';
 import { SajuService } from '../saju/saju.service';
 import { toDate } from 'date-fns-tz';
@@ -18,33 +23,29 @@ export class UsersService {
     private readonly sajuService: SajuService,
   ) {}
 
-  async deleteUser(
-    userId: string,
-    accountId: string,
-    currentUserId: string,
-  ) {
+  async deleteUser(userId: string, accountId: string, currentUserId: string) {
     // First, verify the user exists and belongs to the account
     const user = await usersRepository.findById(userId);
     if (!user) {
       throw new NotFoundException('user_not_found');
     }
-    
+
     // Verify the user belongs to the account from the token
     if (user.accountId !== accountId) {
       throw new BadRequestException('user_does_not_belong_to_account');
     }
-    
+
     // Prevent deleting primary user
     if (user.isPrimary) {
       throw new BadRequestException('primary_user_cannot_be_deleted');
     }
-    
+
     // Delete the user
     await usersRepository.deleteUser(userId);
-    
+
     // Determine which user to return tokens for
     const isDeletingSelf = userId === currentUserId;
-    
+
     if (isDeletingSelf) {
       // If deleting self, return primary user tokens
       const users = await usersRepository.findUsersByAccountId(accountId);
@@ -53,8 +54,10 @@ export class UsersService {
       if (!primaryUser) {
         throw new BadRequestException('primary_user_not_found');
       }
-      
-      const tokens = await this.tokensService.generateAuthTokens(primaryUser.id);
+
+      const tokens = await this.tokensService.generateAuthTokens(
+        primaryUser.id,
+      );
       return {
         user: primaryUser,
         tokens,
@@ -65,8 +68,10 @@ export class UsersService {
       if (!currentUser) {
         throw new NotFoundException('current_user_not_found');
       }
-      
-      const tokens = await this.tokensService.generateAuthTokens(currentUser.id);
+
+      const tokens = await this.tokensService.generateAuthTokens(
+        currentUser.id,
+      );
       return {
         user: currentUser,
         tokens,
@@ -79,12 +84,12 @@ export class UsersService {
     if (!user) {
       throw new NotFoundException('user_not_found');
     }
-    
+
     // Verify the user belongs to the account from the token
     if (user.accountId !== accountId) {
       throw new BadRequestException('user_does_not_belong_to_account');
     }
-    
+
     const tokens = await this.tokensService.generateAuthTokens(user.id);
     return {
       user,
@@ -167,7 +172,8 @@ export class UsersService {
       name: "Harmony's Embrace",
       description:
         'Strengthen emotional bonds and create moments of deeper understanding with someone special.',
-      message: 'Welcome! We\'re excited to have you here. May your journey bring clarity and connection.',
+      message:
+        "Welcome! We're excited to have you here. May your journey bring clarity and connection.",
       sentBy: {
         connect: { id: adminUser.id },
       },

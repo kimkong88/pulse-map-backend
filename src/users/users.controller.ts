@@ -4,7 +4,7 @@ import { UsersService } from './users.service';
 import { OptionalAuthGuard } from '../guards/optionalAuthGuard';
 import { UseGuards } from '@nestjs/common';
 import { UserContext } from '../decorators/userContext';
-import { Account, User } from 'prisma/generated/prisma/client';
+import { Account, User } from '../../prisma/generated/prisma/client';
 import { AuthGuard } from '../guards/authGuard';
 
 @Controller('users')
@@ -36,8 +36,11 @@ export class UsersController {
 
   @Get()
   @UseGuards(AuthGuard)
-  getUsers(@UserContext() context: { user: User, account: { id: string } }) {
-    return this.usersService.getUsersByAccountId(context.user, context.account?.id);
+  getUsers(@UserContext() context: { user: User; account: { id: string } }) {
+    return this.usersService.getUsersByAccountId(
+      context.user,
+      context.account?.id,
+    );
   }
 
   @Post('switch')
