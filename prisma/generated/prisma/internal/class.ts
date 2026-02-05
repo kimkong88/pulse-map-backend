@@ -20,7 +20,7 @@ const config: runtime.GetPrismaClientConfig = {
   "clientVersion": "7.2.0",
   "engineVersion": "0c8ef2ce45c83248ab3df073180d5eda9e8be7a3",
   "activeProvider": "postgresql",
-  "inlineSchema": "model Report {\n  id        String       @id @default(uuid())\n  type      ReportType\n  status    ReportStatus\n  code      String       @unique\n  data      Json\n  input     Json\n  createdAt DateTime     @default(now())\n  updatedAt DateTime     @updatedAt\n}\n\nenum ReportType {\n  personal\n  compatibility\n  forecast\n}\n\nenum ReportStatus {\n  pending\n  in_progress\n  completed\n  failed\n}\n\n// This is your Prisma schema file,\n// learn more about it in the docs: https://pris.ly/d/prisma-schema\n\n// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?\n// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init\n\ngenerator client {\n  provider = \"prisma-client\"\n  output   = \"../generated/prisma\"\n}\n\ndatasource db {\n  provider = \"postgresql\"\n}\n",
+  "inlineSchema": "model Account {\n  id            String         @id @default(uuid())\n  platform      Platform\n  email         String\n  userIds       String[]\n  users         User[]\n  subscriptions Subscription[]\n  createdAt     DateTime       @default(now())\n  updatedAt     DateTime       @updatedAt\n\n  @@unique([platform, email])\n}\n\nenum Platform {\n  google\n  apple\n}\n\nmodel Blessing {\n  id           String   @id @default(uuid())\n  emoji        String // Predefined blessing type emoji\n  name         String // Predefined blessing type name\n  description  String // Predefined blessing type description\n  message      String? // Optional user message\n  receivedById String\n  receivedBy   User     @relation(fields: [receivedById], references: [id], name: \"receivedBy\")\n  sentById     String\n  sentBy       User     @relation(fields: [sentById], references: [id], name: \"sentBy\")\n  expiresAt    DateTime // Required: 24 hours from createdAt\n  createdAt    DateTime @default(now())\n  updatedAt    DateTime @updatedAt\n\n  @@index([receivedById, expiresAt]) // For querying active blessings\n  @@index([sentById, createdAt]) // For querying sent blessings history\n}\n\n// Note: Removed BlessingStatus enum - use expiresAt > now() to check if active\n\nmodel Friend {\n  id           String             @id @default(uuid())\n  userId       String\n  user         User               @relation(fields: [userId], references: [id], name: \"userFriend\")\n  friendUserId String\n  relationship FriendRelationShip\n  friend       User               @relation(fields: [friendUserId], references: [id], name: \"friendUser\")\n  createdAt    DateTime           @default(now())\n  updatedAt    DateTime           @updatedAt\n}\n\nenum FriendRelationShip {\n  friend\n  family\n  romantic\n  colleague\n  other\n}\n\nmodel Question {\n  id        String         @id @default(uuid())\n  type      QuestionType\n  status    QuestionStatus\n  input     Json // Stores: { scope, birthDateTime, gender, birthTimezone, isTimeKnown, ageRange, date? }\n  data      Json\n  expiresAt DateTime?\n  createdAt DateTime       @default(now())\n  updatedAt DateTime       @updatedAt\n}\n\nenum QuestionType {\n  personal\n  compatibility\n  daily\n}\n\nenum QuestionStatus {\n  pending\n  in_progress\n  completed\n  failed\n}\n\nmodel Report {\n  id        String       @id @default(uuid())\n  type      ReportType\n  status    ReportStatus\n  code      String       @unique\n  data      Json\n  input     Json\n  userId    String?\n  user      User?        @relation(fields: [userId], references: [id])\n  createdAt DateTime     @default(now())\n  updatedAt DateTime     @updatedAt\n}\n\nenum ReportType {\n  personal\n  compatibility\n  forecast\n  forecast_14day\n}\n\nenum ReportStatus {\n  pending\n  in_progress\n  completed\n  failed\n}\n\n// This is your Prisma schema file,\n// learn more about it in the docs: https://pris.ly/d/prisma-schema\n\n// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?\n// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init\n\ngenerator client {\n  provider = \"prisma-client\"\n  output   = \"../generated/prisma\"\n}\n\ndatasource db {\n  provider = \"postgresql\"\n}\n\nmodel Subscription {\n  id        String             @id @default(uuid())\n  tier      SubscriptionTier\n  status    SubscriptionStatus @default(active)\n  startedAt DateTime\n  expiresAt DateTime\n  amount    Decimal\n  currency  String\n\n  accountId String\n  account   Account @relation(fields: [accountId], references: [id])\n\n  createdAt DateTime @default(now())\n  updatedAt DateTime @updatedAt\n\n  @@index([accountId, status])\n}\n\nenum SubscriptionStatus {\n  active\n  inactive\n  expired\n}\n\nenum SubscriptionTier {\n  pro\n}\n\nmodel Token {\n  id        String    @id @default(uuid())\n  token     String    @unique\n  expires   DateTime\n  type      TokenType\n  createdAt DateTime  @default(now())\n  updatedAt DateTime  @updatedAt\n  userId    String\n  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)\n\n  @@unique([token, type])\n}\n\nenum TokenType {\n  refresh\n}\n\nmodel User {\n  id              String   @id @default(uuid())\n  fullName        String   @default(\"Anonymous\")\n  gender          Gender\n  birthDate       DateTime\n  birthLocation   String\n  birthTimezone   String\n  currentLocation String\n  currentTimezone String\n  isTimeKnown     Boolean\n  isPrimary       Boolean  @default(false)\n  code            String?  @unique\n  createdAt       DateTime @default(now())\n  updatedAt       DateTime @updatedAt\n\n  reports Report[]\n\n  accountId String?\n  account   Account? @relation(fields: [accountId], references: [id])\n\n  sentblessings     Blessing[] @relation(\"sentBy\")\n  receivedBlessings Blessing[] @relation(\"receivedBy\")\n\n  tokens Token[]\n\n  friends  Friend[] @relation(\"userFriend\")\n  friendOf Friend[] @relation(\"friendUser\")\n}\n\nenum Gender {\n  male\n  female\n}\n",
   "runtimeDataModel": {
     "models": {},
     "enums": {},
@@ -28,7 +28,7 @@ const config: runtime.GetPrismaClientConfig = {
   }
 }
 
-config.runtimeDataModel = JSON.parse("{\"models\":{\"Report\":{\"fields\":[{\"name\":\"id\",\"kind\":\"scalar\",\"type\":\"String\"},{\"name\":\"type\",\"kind\":\"enum\",\"type\":\"ReportType\"},{\"name\":\"status\",\"kind\":\"enum\",\"type\":\"ReportStatus\"},{\"name\":\"code\",\"kind\":\"scalar\",\"type\":\"String\"},{\"name\":\"data\",\"kind\":\"scalar\",\"type\":\"Json\"},{\"name\":\"input\",\"kind\":\"scalar\",\"type\":\"Json\"},{\"name\":\"createdAt\",\"kind\":\"scalar\",\"type\":\"DateTime\"},{\"name\":\"updatedAt\",\"kind\":\"scalar\",\"type\":\"DateTime\"}],\"dbName\":null}},\"enums\":{},\"types\":{}}")
+config.runtimeDataModel = JSON.parse("{\"models\":{\"Account\":{\"fields\":[{\"name\":\"id\",\"kind\":\"scalar\",\"type\":\"String\"},{\"name\":\"platform\",\"kind\":\"enum\",\"type\":\"Platform\"},{\"name\":\"email\",\"kind\":\"scalar\",\"type\":\"String\"},{\"name\":\"userIds\",\"kind\":\"scalar\",\"type\":\"String\"},{\"name\":\"users\",\"kind\":\"object\",\"type\":\"User\",\"relationName\":\"AccountToUser\"},{\"name\":\"subscriptions\",\"kind\":\"object\",\"type\":\"Subscription\",\"relationName\":\"AccountToSubscription\"},{\"name\":\"createdAt\",\"kind\":\"scalar\",\"type\":\"DateTime\"},{\"name\":\"updatedAt\",\"kind\":\"scalar\",\"type\":\"DateTime\"}],\"dbName\":null},\"Blessing\":{\"fields\":[{\"name\":\"id\",\"kind\":\"scalar\",\"type\":\"String\"},{\"name\":\"emoji\",\"kind\":\"scalar\",\"type\":\"String\"},{\"name\":\"name\",\"kind\":\"scalar\",\"type\":\"String\"},{\"name\":\"description\",\"kind\":\"scalar\",\"type\":\"String\"},{\"name\":\"message\",\"kind\":\"scalar\",\"type\":\"String\"},{\"name\":\"receivedById\",\"kind\":\"scalar\",\"type\":\"String\"},{\"name\":\"receivedBy\",\"kind\":\"object\",\"type\":\"User\",\"relationName\":\"receivedBy\"},{\"name\":\"sentById\",\"kind\":\"scalar\",\"type\":\"String\"},{\"name\":\"sentBy\",\"kind\":\"object\",\"type\":\"User\",\"relationName\":\"sentBy\"},{\"name\":\"expiresAt\",\"kind\":\"scalar\",\"type\":\"DateTime\"},{\"name\":\"createdAt\",\"kind\":\"scalar\",\"type\":\"DateTime\"},{\"name\":\"updatedAt\",\"kind\":\"scalar\",\"type\":\"DateTime\"}],\"dbName\":null},\"Friend\":{\"fields\":[{\"name\":\"id\",\"kind\":\"scalar\",\"type\":\"String\"},{\"name\":\"userId\",\"kind\":\"scalar\",\"type\":\"String\"},{\"name\":\"user\",\"kind\":\"object\",\"type\":\"User\",\"relationName\":\"userFriend\"},{\"name\":\"friendUserId\",\"kind\":\"scalar\",\"type\":\"String\"},{\"name\":\"relationship\",\"kind\":\"enum\",\"type\":\"FriendRelationShip\"},{\"name\":\"friend\",\"kind\":\"object\",\"type\":\"User\",\"relationName\":\"friendUser\"},{\"name\":\"createdAt\",\"kind\":\"scalar\",\"type\":\"DateTime\"},{\"name\":\"updatedAt\",\"kind\":\"scalar\",\"type\":\"DateTime\"}],\"dbName\":null},\"Question\":{\"fields\":[{\"name\":\"id\",\"kind\":\"scalar\",\"type\":\"String\"},{\"name\":\"type\",\"kind\":\"enum\",\"type\":\"QuestionType\"},{\"name\":\"status\",\"kind\":\"enum\",\"type\":\"QuestionStatus\"},{\"name\":\"input\",\"kind\":\"scalar\",\"type\":\"Json\"},{\"name\":\"data\",\"kind\":\"scalar\",\"type\":\"Json\"},{\"name\":\"expiresAt\",\"kind\":\"scalar\",\"type\":\"DateTime\"},{\"name\":\"createdAt\",\"kind\":\"scalar\",\"type\":\"DateTime\"},{\"name\":\"updatedAt\",\"kind\":\"scalar\",\"type\":\"DateTime\"}],\"dbName\":null},\"Report\":{\"fields\":[{\"name\":\"id\",\"kind\":\"scalar\",\"type\":\"String\"},{\"name\":\"type\",\"kind\":\"enum\",\"type\":\"ReportType\"},{\"name\":\"status\",\"kind\":\"enum\",\"type\":\"ReportStatus\"},{\"name\":\"code\",\"kind\":\"scalar\",\"type\":\"String\"},{\"name\":\"data\",\"kind\":\"scalar\",\"type\":\"Json\"},{\"name\":\"input\",\"kind\":\"scalar\",\"type\":\"Json\"},{\"name\":\"userId\",\"kind\":\"scalar\",\"type\":\"String\"},{\"name\":\"user\",\"kind\":\"object\",\"type\":\"User\",\"relationName\":\"ReportToUser\"},{\"name\":\"createdAt\",\"kind\":\"scalar\",\"type\":\"DateTime\"},{\"name\":\"updatedAt\",\"kind\":\"scalar\",\"type\":\"DateTime\"}],\"dbName\":null},\"Subscription\":{\"fields\":[{\"name\":\"id\",\"kind\":\"scalar\",\"type\":\"String\"},{\"name\":\"tier\",\"kind\":\"enum\",\"type\":\"SubscriptionTier\"},{\"name\":\"status\",\"kind\":\"enum\",\"type\":\"SubscriptionStatus\"},{\"name\":\"startedAt\",\"kind\":\"scalar\",\"type\":\"DateTime\"},{\"name\":\"expiresAt\",\"kind\":\"scalar\",\"type\":\"DateTime\"},{\"name\":\"amount\",\"kind\":\"scalar\",\"type\":\"Decimal\"},{\"name\":\"currency\",\"kind\":\"scalar\",\"type\":\"String\"},{\"name\":\"accountId\",\"kind\":\"scalar\",\"type\":\"String\"},{\"name\":\"account\",\"kind\":\"object\",\"type\":\"Account\",\"relationName\":\"AccountToSubscription\"},{\"name\":\"createdAt\",\"kind\":\"scalar\",\"type\":\"DateTime\"},{\"name\":\"updatedAt\",\"kind\":\"scalar\",\"type\":\"DateTime\"}],\"dbName\":null},\"Token\":{\"fields\":[{\"name\":\"id\",\"kind\":\"scalar\",\"type\":\"String\"},{\"name\":\"token\",\"kind\":\"scalar\",\"type\":\"String\"},{\"name\":\"expires\",\"kind\":\"scalar\",\"type\":\"DateTime\"},{\"name\":\"type\",\"kind\":\"enum\",\"type\":\"TokenType\"},{\"name\":\"createdAt\",\"kind\":\"scalar\",\"type\":\"DateTime\"},{\"name\":\"updatedAt\",\"kind\":\"scalar\",\"type\":\"DateTime\"},{\"name\":\"userId\",\"kind\":\"scalar\",\"type\":\"String\"},{\"name\":\"user\",\"kind\":\"object\",\"type\":\"User\",\"relationName\":\"TokenToUser\"}],\"dbName\":null},\"User\":{\"fields\":[{\"name\":\"id\",\"kind\":\"scalar\",\"type\":\"String\"},{\"name\":\"fullName\",\"kind\":\"scalar\",\"type\":\"String\"},{\"name\":\"gender\",\"kind\":\"enum\",\"type\":\"Gender\"},{\"name\":\"birthDate\",\"kind\":\"scalar\",\"type\":\"DateTime\"},{\"name\":\"birthLocation\",\"kind\":\"scalar\",\"type\":\"String\"},{\"name\":\"birthTimezone\",\"kind\":\"scalar\",\"type\":\"String\"},{\"name\":\"currentLocation\",\"kind\":\"scalar\",\"type\":\"String\"},{\"name\":\"currentTimezone\",\"kind\":\"scalar\",\"type\":\"String\"},{\"name\":\"isTimeKnown\",\"kind\":\"scalar\",\"type\":\"Boolean\"},{\"name\":\"isPrimary\",\"kind\":\"scalar\",\"type\":\"Boolean\"},{\"name\":\"code\",\"kind\":\"scalar\",\"type\":\"String\"},{\"name\":\"createdAt\",\"kind\":\"scalar\",\"type\":\"DateTime\"},{\"name\":\"updatedAt\",\"kind\":\"scalar\",\"type\":\"DateTime\"},{\"name\":\"reports\",\"kind\":\"object\",\"type\":\"Report\",\"relationName\":\"ReportToUser\"},{\"name\":\"accountId\",\"kind\":\"scalar\",\"type\":\"String\"},{\"name\":\"account\",\"kind\":\"object\",\"type\":\"Account\",\"relationName\":\"AccountToUser\"},{\"name\":\"sentblessings\",\"kind\":\"object\",\"type\":\"Blessing\",\"relationName\":\"sentBy\"},{\"name\":\"receivedBlessings\",\"kind\":\"object\",\"type\":\"Blessing\",\"relationName\":\"receivedBy\"},{\"name\":\"tokens\",\"kind\":\"object\",\"type\":\"Token\",\"relationName\":\"TokenToUser\"},{\"name\":\"friends\",\"kind\":\"object\",\"type\":\"Friend\",\"relationName\":\"userFriend\"},{\"name\":\"friendOf\",\"kind\":\"object\",\"type\":\"Friend\",\"relationName\":\"friendUser\"}],\"dbName\":null}},\"enums\":{},\"types\":{}}")
 
 async function decodeBase64AsWasm(wasmBase64: string): Promise<WebAssembly.Module> {
   const { Buffer } = await import('node:buffer')
@@ -58,8 +58,8 @@ export interface PrismaClientConstructor {
    * @example
    * ```
    * const prisma = new PrismaClient()
-   * // Fetch zero or more Reports
-   * const reports = await prisma.report.findMany()
+   * // Fetch zero or more Accounts
+   * const accounts = await prisma.account.findMany()
    * ```
    * 
    * Read more in our [docs](https://pris.ly/d/client).
@@ -80,8 +80,8 @@ export interface PrismaClientConstructor {
  * @example
  * ```
  * const prisma = new PrismaClient()
- * // Fetch zero or more Reports
- * const reports = await prisma.report.findMany()
+ * // Fetch zero or more Accounts
+ * const accounts = await prisma.account.findMany()
  * ```
  * 
  * Read more in our [docs](https://pris.ly/d/client).
@@ -175,6 +175,46 @@ export interface PrismaClient<
   }>>
 
       /**
+   * `prisma.account`: Exposes CRUD operations for the **Account** model.
+    * Example usage:
+    * ```ts
+    * // Fetch zero or more Accounts
+    * const accounts = await prisma.account.findMany()
+    * ```
+    */
+  get account(): Prisma.AccountDelegate<ExtArgs, { omit: OmitOpts }>;
+
+  /**
+   * `prisma.blessing`: Exposes CRUD operations for the **Blessing** model.
+    * Example usage:
+    * ```ts
+    * // Fetch zero or more Blessings
+    * const blessings = await prisma.blessing.findMany()
+    * ```
+    */
+  get blessing(): Prisma.BlessingDelegate<ExtArgs, { omit: OmitOpts }>;
+
+  /**
+   * `prisma.friend`: Exposes CRUD operations for the **Friend** model.
+    * Example usage:
+    * ```ts
+    * // Fetch zero or more Friends
+    * const friends = await prisma.friend.findMany()
+    * ```
+    */
+  get friend(): Prisma.FriendDelegate<ExtArgs, { omit: OmitOpts }>;
+
+  /**
+   * `prisma.question`: Exposes CRUD operations for the **Question** model.
+    * Example usage:
+    * ```ts
+    * // Fetch zero or more Questions
+    * const questions = await prisma.question.findMany()
+    * ```
+    */
+  get question(): Prisma.QuestionDelegate<ExtArgs, { omit: OmitOpts }>;
+
+  /**
    * `prisma.report`: Exposes CRUD operations for the **Report** model.
     * Example usage:
     * ```ts
@@ -183,6 +223,36 @@ export interface PrismaClient<
     * ```
     */
   get report(): Prisma.ReportDelegate<ExtArgs, { omit: OmitOpts }>;
+
+  /**
+   * `prisma.subscription`: Exposes CRUD operations for the **Subscription** model.
+    * Example usage:
+    * ```ts
+    * // Fetch zero or more Subscriptions
+    * const subscriptions = await prisma.subscription.findMany()
+    * ```
+    */
+  get subscription(): Prisma.SubscriptionDelegate<ExtArgs, { omit: OmitOpts }>;
+
+  /**
+   * `prisma.token`: Exposes CRUD operations for the **Token** model.
+    * Example usage:
+    * ```ts
+    * // Fetch zero or more Tokens
+    * const tokens = await prisma.token.findMany()
+    * ```
+    */
+  get token(): Prisma.TokenDelegate<ExtArgs, { omit: OmitOpts }>;
+
+  /**
+   * `prisma.user`: Exposes CRUD operations for the **User** model.
+    * Example usage:
+    * ```ts
+    * // Fetch zero or more Users
+    * const users = await prisma.user.findMany()
+    * ```
+    */
+  get user(): Prisma.UserDelegate<ExtArgs, { omit: OmitOpts }>;
 }
 
 export function getPrismaClientClass(): PrismaClientConstructor {

@@ -415,23 +415,7 @@ export class BaziDataExtractor {
         // Create raw trigger (no weighting - that's aggregator's job)
         // Use library's favorability flags directly
 
-        // 🔍 DEBUG: Check if library provides directional information
-        if (
-          interaction.type.includes('Clash') &&
-          interaction.consequenceNotes?.length
-        ) {
-          console.log('🔍 CLASH INTERACTION DEBUG:', {
-            type: interaction.type,
-            involvesFavorable: interaction.involvesFavorableElement,
-            involvesUnfavorable: interaction.involvesUnfavorableElement,
-            consequenceNotes: interaction.consequenceNotes,
-            description: interaction.description,
-            participants: interaction.participants.map((p) => ({
-              source: p.source,
-              element: p.elementChar,
-            })),
-          });
-        }
+        // Library provides directional information via consequenceNotes
 
         area.triggers.push({
           type: interaction.type,

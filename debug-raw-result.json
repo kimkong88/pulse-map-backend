@@ -1,0 +1,405 @@
+{
+  "text": "",
+  "textLength": 0,
+  "steps": [
+    {
+      "content": [
+        {
+          "type": "tool-call",
+          "toolCallId": "yKDNUHkLdsiYByGj",
+          "toolName": "getBasicAnalysis",
+          "input": {},
+          "providerMetadata": {
+            "google": {
+              "thoughtSignature": "CqwIAXLI2nyqhcBcxcAeRzRq4CzMmyj5n+kwuS+bI2FP/OcV4fwCCKaKJi9GeIZUSJPSNXO0R80EDiecBFcubm1ZiZtLJnScmvbHqv9zh6XcJ4GMDAijHtQ5kLs3CHtho2y7TSuZQ0ZShhLLupGATmqrrWvonD3+LpQE5TQIPg8P5FX0VJP3JbRE6svL2MhvBJq3TjfpoRfKkaylo5t+bRTRrrhx7LmvKyXybhwolqFgR37g+BFE40TCKSD/EhbLIYJjf0QZ2zrWIuFuJ1MVNjwkcRz+gpLZfHviuPVKosq5KB3K0QI8WT4/L/BxfE/hP7GEbpAZPor6MiEocUFQ9IZ2jU+pHKDjoQA0kGPWWbZzKb0i51Bgi4Pf6e1yv2HO97Oz34LL3NngvLuqr/an8DZ8xY5gXvWYCCgYh/gwSdKQQ1REVA7K11fYuYyLL3B8kuzuXjhM/ynCyOYTNEm/Rw5N/5IxFjCrbafA83PkW9l2B5gUqeBkMr7f7nkV8QCdSUgo+2f34u0voOCljrEC/U0IW4zuGhufFbTZDmYbDSUDyAuNKW4sVQ1IlCNVTmzGI3N+WtMlUr4DsqmYHv8NeDxqZdAC1BsiG8tcsA0v3/wxoCCEKxuGsOjpaRFNUWSOigE9dBXtisfE10L1YHOaqxiHU+uKu5ZdFlM2ejTmq/B82akgTv/1M7mpLDbbrNXopSeX25ws/w8R9Svesuw7hoxAaGp5g74EOtHgrhhen0DRDFKeZMrv2DMlu7aR52Ne0aZh9m0LfCUa8pEoE21BPtqsIo6Gh/1F20tqysyDt99BEdkcGG3tefsjUhYq737rLGlASrtYvvcYjEGPPP+mntSXsTxFxzGXsjiDc9OOOP/q96zYHFJSsSPtNiQFdRUenn8y/C6Q5ykZCl09m0RXzIqKuIRofSpFF2INctX10vaeJknbtc57eG+nzsbQSF42OuFnQPFTivVUfW4+vvB77LWamk72jm8OGDHIHUolJebPsucIwKqruEBmDszvCtxQhbmPXN6yRSpWwd0FESwIHER/ZqA5h/RvFXp8mJHj4fePMDclHCuQuCLVDSOMa3fGc5HrElBxO/QbeQKJkNUrXndS35Eoas0PJp4qOM2UNplDGsBShwsmgCplanIkQ2mi2y4cvAtr1zZv/h55WeKNl0dvuqNzZRNEX8Z+EigMsc1KYLfaeBBab3SJC6H/upksyM2j14TcwfZJMkhtyYrn0gyg7aakAwyPG0S6Lg2QC2qs5AtAaY/jHuDHMGa4GPl9chLZCTYLmQFPg6vfyEhIiu2YqJFIVM0qyN3hazau4IzvjqAQ29GMBvamj4mwz1njQxdw1FPt8CQxPvixoXSNoAkc+EAXLSV38124cNFQanoVCW7BhqtLIKBrzY/ON18RCQG1johOnnIgw05hcbC6"
+            }
+          }
+        },
+        {
+          "type": "tool-result",
+          "toolCallId": "yKDNUHkLdsiYByGj",
+          "toolName": "getBasicAnalysis",
+          "input": {},
+          "output": {
+            "specialStars": {
+              "nobleman": [
+                "亥",
+                "酉"
+              ],
+              "intelligence": "酉",
+              "skyHorse": "寅",
+              "peachBlossom": "酉"
+            },
+            "elementCounts": {
+              "WOOD": 12,
+              "FIRE": 30,
+              "EARTH": 40,
+              "METAL": 14,
+              "WATER": 4
+            },
+            "dayMaster": {
+              "stem": "丁",
+              "element": "FIRE",
+              "nature": "Yin"
+            },
+            "strength": {
+              "level": "Weak",
+              "score": -45,
+              "notes": [
+                "Season (午 FIRE): +50 (Strong Companion Season)",
+                "Hidden Year (戊 as Shang Guan): -10.0",
+                "Hidden Year (乙 as Pian Yin): +12.0",
+                "Hidden Year (癸 as Qi Sha): -15.0",
+                "Hidden Month (己 as Shi Shen): -10.0",
+                "Hidden Day (辛 as Pian Cai): -18.0 (Weighted)",
+                "Hidden Hour (戊 as Shang Guan): -10.0",
+                "Hidden Hour (辛 as Pian Cai): -12.0",
+                "Stem Year (戊 as Shang Guan): -10",
+                "Stem Month (戊 as Shang Guan): -10",
+                "Stem Hour (庚 as Zheng Cai): -12"
+              ]
+            },
+            "favorableElements": {
+              "primary": [
+                "WOOD",
+                "FIRE"
+              ],
+              "secondary": [],
+              "unfavorable": [
+                "EARTH",
+                "METAL",
+                "WATER"
+              ],
+              "notes": [
+                "DM Strength: Weak (Score: -45.0)",
+                "Weak DM: Resource, Companion favorable."
+              ]
+            }
+          },
+          "dynamic": false,
+          "providerMetadata": {
+            "google": {
+              "thoughtSignature": "CqwIAXLI2nyqhcBcxcAeRzRq4CzMmyj5n+kwuS+bI2FP/OcV4fwCCKaKJi9GeIZUSJPSNXO0R80EDiecBFcubm1ZiZtLJnScmvbHqv9zh6XcJ4GMDAijHtQ5kLs3CHtho2y7TSuZQ0ZShhLLupGATmqrrWvonD3+LpQE5TQIPg8P5FX0VJP3JbRE6svL2MhvBJq3TjfpoRfKkaylo5t+bRTRrrhx7LmvKyXybhwolqFgR37g+BFE40TCKSD/EhbLIYJjf0QZ2zrWIuFuJ1MVNjwkcRz+gpLZfHviuPVKosq5KB3K0QI8WT4/L/BxfE/hP7GEbpAZPor6MiEocUFQ9IZ2jU+pHKDjoQA0kGPWWbZzKb0i51Bgi4Pf6e1yv2HO97Oz34LL3NngvLuqr/an8DZ8xY5gXvWYCCgYh/gwSdKQQ1REVA7K11fYuYyLL3B8kuzuXjhM/ynCyOYTNEm/Rw5N/5IxFjCrbafA83PkW9l2B5gUqeBkMr7f7nkV8QCdSUgo+2f34u0voOCljrEC/U0IW4zuGhufFbTZDmYbDSUDyAuNKW4sVQ1IlCNVTmzGI3N+WtMlUr4DsqmYHv8NeDxqZdAC1BsiG8tcsA0v3/wxoCCEKxuGsOjpaRFNUWSOigE9dBXtisfE10L1YHOaqxiHU+uKu5ZdFlM2ejTmq/B82akgTv/1M7mpLDbbrNXopSeX25ws/w8R9Svesuw7hoxAaGp5g74EOtHgrhhen0DRDFKeZMrv2DMlu7aR52Ne0aZh9m0LfCUa8pEoE21BPtqsIo6Gh/1F20tqysyDt99BEdkcGG3tefsjUhYq737rLGlASrtYvvcYjEGPPP+mntSXsTxFxzGXsjiDc9OOOP/q96zYHFJSsSPtNiQFdRUenn8y/C6Q5ykZCl09m0RXzIqKuIRofSpFF2INctX10vaeJknbtc57eG+nzsbQSF42OuFnQPFTivVUfW4+vvB77LWamk72jm8OGDHIHUolJebPsucIwKqruEBmDszvCtxQhbmPXN6yRSpWwd0FESwIHER/ZqA5h/RvFXp8mJHj4fePMDclHCuQuCLVDSOMa3fGc5HrElBxO/QbeQKJkNUrXndS35Eoas0PJp4qOM2UNplDGsBShwsmgCplanIkQ2mi2y4cvAtr1zZv/h55WeKNl0dvuqNzZRNEX8Z+EigMsc1KYLfaeBBab3SJC6H/upksyM2j14TcwfZJMkhtyYrn0gyg7aakAwyPG0S6Lg2QC2qs5AtAaY/jHuDHMGa4GPl9chLZCTYLmQFPg6vfyEhIiu2YqJFIVM0qyN3hazau4IzvjqAQ29GMBvamj4mwz1njQxdw1FPt8CQxPvixoXSNoAkc+EAXLSV38124cNFQanoVCW7BhqtLIKBrzY/ON18RCQG1johOnnIgw05hcbC6"
+            }
+          }
+        }
+      ],
+      "finishReason": "tool-calls",
+      "rawFinishReason": "STOP",
+      "usage": {
+        "inputTokens": 1511,
+        "inputTokenDetails": {
+          "noCacheTokens": 709,
+          "cacheReadTokens": 802
+        },
+        "outputTokens": 263,
+        "outputTokenDetails": {
+          "textTokens": 10,
+          "reasoningTokens": 253
+        },
+        "totalTokens": 1774,
+        "raw": {
+          "cachedContentTokenCount": 802,
+          "thoughtsTokenCount": 253,
+          "promptTokenCount": 1511,
+          "candidatesTokenCount": 10,
+          "totalTokenCount": 1774
+        },
+        "reasoningTokens": 253,
+        "cachedInputTokens": 802
+      },
+      "warnings": [],
+      "request": {
+        "body": {
+          "generationConfig": {},
+          "contents": [
+            {
+              "role": "user",
+              "parts": [
+                {
+                  "text": "Please answer this question for the user:\n\n\"When will I get rich?\"\n\nCONTEXT:\n- Current age: 38\n- Current year: 2026\n- Gender: male\n\nSTEP 1: Use the tools in this order:\n1. getBasicAnalysis() - Check their natal chart first\n2. getLuckPillarAtAge(38) - See their current 10-year cycle\n3. getYearPillars([2026, 2027, 2028, 2029, 2030]) - Check next 5 years\n4. getYearInteractions() - For any promising years you identified\n\nSTEP 2: After gathering data from tools, write your comprehensive answer.\n\nIMPORTANT: Do NOT write the answer before calling the tools!"
+                }
+              ]
+            }
+          ],
+          "systemInstruction": {
+            "parts": [
+              {
+                "text": "You are an expert BaZi (Four Pillars of Destiny) consultant with a gift for making ancient wisdom accessible and engaging to modern audiences.\n\nYOUR ROLE:\n- YOU MUST USE THE TOOLS to analyze the user's actual BaZi chart data\n- DO NOT make assumptions or give generic advice without checking their chart first\n- Provide insights that are SPECIFIC, ACTIONABLE, and GROUNDED IN THEIR CHART DATA\n- Write in a warm, conversational tone that feels like advice from a wise friend\n- Avoid jargon - explain concepts naturally without Chinese terms unless absolutely necessary\n- BE HONEST: If their chart shows challenges or unfavorable patterns, say so. Don't sugarcoat or promise outcomes that aren't supported by the data.\n\nCRITICAL: You MUST call the tools to get their chart data. Do not respond without using tools first!\nCRITICAL: Be truthful - if the chart shows weak wealth indicators, say so. If it shows strong potential, say so. Base everything on actual chart data, not wishful thinking.\n\nRESPONSE STRUCTURE:\nYour answer should have these sections:\n\n1. **Opening Hook** (2-3 sentences)\n   - Start with something that immediately resonates with their question\n   - Reference a specific insight from their chart that sets the tone\n   - Make them feel seen and understood\n\n2. **Key Insights** (3-5 key points)\n   - Each insight should be specific to their chart\n   - Use actual years, ages, or time periods when relevant\n   - Connect the dots between their chart patterns and real-life implications\n   - Be honest about both favorable AND challenging periods\n   - If their chart shows weak indicators for this question, acknowledge it honestly\n   - Don't promise outcomes that aren't supported by the data\n\n3. **Timing & Recommendations** (specific guidance)\n   - Provide concrete time windows (e.g., \"between ages 35-37\" or \"2027-2029\")\n   - Explain WHY these periods are significant based on their chart\n   - Include 2-3 actionable recommendations\n\n4. **Closing Encouragement** (2-3 sentences)\n   - Empower them with agency - remind them they shape their destiny\n   - Be balanced: If the outlook is challenging, acknowledge it but offer realistic paths forward\n   - If the outlook is favorable, encourage action without overpromising\n   - Leave them feeling informed and realistic, not just optimistic\n\nIMPORTANT - METRICS FOR VISUALIZATION:\nAt the END of your response, on a new line, include a metrics section in this EXACT format:\n[METRICS]\nlikelihood: [0-100] (how likely/favorable this outcome is based on their chart)\ntiming_clarity: [0-100] (how clear the timing indicators are)\nchallenge_level: [0-100] (how much effort/challenge is involved)\n[/METRICS]\n\nCRITICAL FOR METRICS:\n- Base these numbers STRICTLY on what you found in their chart data\n- If their chart shows weak wealth indicators, likelihood should be LOW (e.g., 20-40)\n- If their chart shows strong indicators, likelihood can be HIGH (e.g., 70-90)\n- Be honest - not everyone will have high likelihood. Some charts show challenges.\n- If the chart data doesn't support the outcome, set likelihood accordingly (could be 30, 40, 50, etc.)\n- Don't inflate numbers to make people feel good - accuracy builds trust\n\nTONE GUIDELINES:\n- ✅ \"Your chart shows strong wealth potential emerging around age 35...\"\n- ✅ \"The next 2 years favor bold career moves because...\"\n- ❌ Avoid: \"Your Day Master is weak Earth meeting strong Wood...\"\n- ❌ Avoid: \"You have 桃花 in your chart...\"\n- ✅ DO use years, ages, and specific timeframes\n- ✅ DO explain the \"why\" behind patterns\n- ❌ DON'T be vague or overly mystical\n\nTOOL USAGE (MANDATORY):\n1. FIRST: Call getBasicAnalysis() to see their natal chart\n2. THEN: Try getLuckPillarAtAge() with their current age - if it fails, that's okay, continue with other tools\n3. THEN: Call getYearPillars() with 5-10 years from now to see upcoming periods\n4. FINALLY: Call getYearInteractions() for 2-3 specific years that look interesting\n\nNOTE: If getLuckPillarAtAge returns an error (e.g., \"time unknown\"), you can still provide excellent insights using year pillars and interactions. Don't let a missing luck pillar stop you from giving a complete answer.\n\nRemember: Your goal is to provide genuinely helpful guidance that feels personal, specific, and actionable - all based on their ACTUAL chart data."
+              }
+            ]
+          },
+          "tools": [
+            {
+              "functionDeclarations": [
+                {
+                  "name": "getBasicAnalysis",
+                  "description": "Get basic BaZi analysis including special stars (桃花, 貴人, etc.), element counts, day master info, and favorable elements"
+                },
+                {
+                  "name": "getYearPillars",
+                  "description": "Get BaZi year pillars (stem & branch) for multiple years. Useful for analyzing timing over a period.",
+                  "parameters": {
+                    "required": [
+                      "years"
+                    ],
+                    "type": "object",
+                    "properties": {
+                      "years": {
+                        "description": "Array of years to get pillars for (e.g., [2026, 2027, 2028])",
+                        "type": "array",
+                        "items": {
+                          "type": "number"
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "getLuckPillarAtAge",
+                  "description": "Get the active Luck Pillar (大運) for a specific age. Luck Pillars change every 10 years and represent major life cycles.",
+                  "parameters": {
+                    "required": [
+                      "age"
+                    ],
+                    "type": "object",
+                    "properties": {
+                      "age": {
+                        "description": "Age to check (e.g., 37)",
+                        "type": "number"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "getYearInteractions",
+                  "description": "Get BaZi interactions (clashes, harmonies, etc.) between natal chart and a specific year. Shows how favorable or challenging that year is.",
+                  "parameters": {
+                    "required": [
+                      "year"
+                    ],
+                    "type": "object",
+                    "properties": {
+                      "year": {
+                        "description": "Year to analyze interactions for (e.g., 2027)",
+                        "type": "number"
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          ],
+          "toolConfig": {
+            "functionCallingConfig": {
+              "mode": "AUTO"
+            }
+          }
+        }
+      },
+      "response": {
+        "id": "aitxt-2yNNCIU8L9SAGJAX3V9rTLHW",
+        "timestamp": "2026-01-17T10:09:53.586Z",
+        "modelId": "gemini-2.5-flash",
+        "headers": {
+          "alt-svc": "h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000",
+          "content-encoding": "gzip",
+          "content-type": "application/json; charset=UTF-8",
+          "date": "Sat, 17 Jan 2026 10:09:57 GMT",
+          "server": "scaffolding on HTTPServer2",
+          "server-timing": "gfet4t7; dur=1548",
+          "transfer-encoding": "chunked",
+          "vary": "Origin, X-Origin, Referer",
+          "x-content-type-options": "nosniff",
+          "x-frame-options": "SAMEORIGIN",
+          "x-xss-protection": "0"
+        },
+        "body": {
+          "candidates": [
+            {
+              "content": {
+                "parts": [
+                  {
+                    "functionCall": {
+                      "name": "getBasicAnalysis",
+                      "args": {}
+                    },
+                    "thoughtSignature": "CqwIAXLI2nyqhcBcxcAeRzRq4CzMmyj5n+kwuS+bI2FP/OcV4fwCCKaKJi9GeIZUSJPSNXO0R80EDiecBFcubm1ZiZtLJnScmvbHqv9zh6XcJ4GMDAijHtQ5kLs3CHtho2y7TSuZQ0ZShhLLupGATmqrrWvonD3+LpQE5TQIPg8P5FX0VJP3JbRE6svL2MhvBJq3TjfpoRfKkaylo5t+bRTRrrhx7LmvKyXybhwolqFgR37g+BFE40TCKSD/EhbLIYJjf0QZ2zrWIuFuJ1MVNjwkcRz+gpLZfHviuPVKosq5KB3K0QI8WT4/L/BxfE/hP7GEbpAZPor6MiEocUFQ9IZ2jU+pHKDjoQA0kGPWWbZzKb0i51Bgi4Pf6e1yv2HO97Oz34LL3NngvLuqr/an8DZ8xY5gXvWYCCgYh/gwSdKQQ1REVA7K11fYuYyLL3B8kuzuXjhM/ynCyOYTNEm/Rw5N/5IxFjCrbafA83PkW9l2B5gUqeBkMr7f7nkV8QCdSUgo+2f34u0voOCljrEC/U0IW4zuGhufFbTZDmYbDSUDyAuNKW4sVQ1IlCNVTmzGI3N+WtMlUr4DsqmYHv8NeDxqZdAC1BsiG8tcsA0v3/wxoCCEKxuGsOjpaRFNUWSOigE9dBXtisfE10L1YHOaqxiHU+uKu5ZdFlM2ejTmq/B82akgTv/1M7mpLDbbrNXopSeX25ws/w8R9Svesuw7hoxAaGp5g74EOtHgrhhen0DRDFKeZMrv2DMlu7aR52Ne0aZh9m0LfCUa8pEoE21BPtqsIo6Gh/1F20tqysyDt99BEdkcGG3tefsjUhYq737rLGlASrtYvvcYjEGPPP+mntSXsTxFxzGXsjiDc9OOOP/q96zYHFJSsSPtNiQFdRUenn8y/C6Q5ykZCl09m0RXzIqKuIRofSpFF2INctX10vaeJknbtc57eG+nzsbQSF42OuFnQPFTivVUfW4+vvB77LWamk72jm8OGDHIHUolJebPsucIwKqruEBmDszvCtxQhbmPXN6yRSpWwd0FESwIHER/ZqA5h/RvFXp8mJHj4fePMDclHCuQuCLVDSOMa3fGc5HrElBxO/QbeQKJkNUrXndS35Eoas0PJp4qOM2UNplDGsBShwsmgCplanIkQ2mi2y4cvAtr1zZv/h55WeKNl0dvuqNzZRNEX8Z+EigMsc1KYLfaeBBab3SJC6H/upksyM2j14TcwfZJMkhtyYrn0gyg7aakAwyPG0S6Lg2QC2qs5AtAaY/jHuDHMGa4GPl9chLZCTYLmQFPg6vfyEhIiu2YqJFIVM0qyN3hazau4IzvjqAQ29GMBvamj4mwz1njQxdw1FPt8CQxPvixoXSNoAkc+EAXLSV38124cNFQanoVCW7BhqtLIKBrzY/ON18RCQG1johOnnIgw05hcbC6"
+                  }
+                ],
+                "role": "model"
+              },
+              "finishReason": "STOP",
+              "index": 0,
+              "finishMessage": "Model generated function call(s)."
+            }
+          ],
+          "usageMetadata": {
+            "promptTokenCount": 1511,
+            "candidatesTokenCount": 10,
+            "totalTokenCount": 1774,
+            "cachedContentTokenCount": 802,
+            "promptTokensDetails": [
+              {
+                "modality": "TEXT",
+                "tokenCount": 1511
+              }
+            ],
+            "cacheTokensDetails": [
+              {
+                "modality": "TEXT",
+                "tokenCount": 802
+              }
+            ],
+            "thoughtsTokenCount": 253
+          },
+          "modelVersion": "gemini-2.5-flash",
+          "responseId": "9V9raYTbJdyLqtsPtcXDwQM"
+        },
+        "messages": [
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "tool-call",
+                "toolCallId": "yKDNUHkLdsiYByGj",
+                "toolName": "getBasicAnalysis",
+                "input": {},
+                "providerOptions": {
+                  "google": {
+                    "thoughtSignature": "CqwIAXLI2nyqhcBcxcAeRzRq4CzMmyj5n+kwuS+bI2FP/OcV4fwCCKaKJi9GeIZUSJPSNXO0R80EDiecBFcubm1ZiZtLJnScmvbHqv9zh6XcJ4GMDAijHtQ5kLs3CHtho2y7TSuZQ0ZShhLLupGATmqrrWvonD3+LpQE5TQIPg8P5FX0VJP3JbRE6svL2MhvBJq3TjfpoRfKkaylo5t+bRTRrrhx7LmvKyXybhwolqFgR37g+BFE40TCKSD/EhbLIYJjf0QZ2zrWIuFuJ1MVNjwkcRz+gpLZfHviuPVKosq5KB3K0QI8WT4/L/BxfE/hP7GEbpAZPor6MiEocUFQ9IZ2jU+pHKDjoQA0kGPWWbZzKb0i51Bgi4Pf6e1yv2HO97Oz34LL3NngvLuqr/an8DZ8xY5gXvWYCCgYh/gwSdKQQ1REVA7K11fYuYyLL3B8kuzuXjhM/ynCyOYTNEm/Rw5N/5IxFjCrbafA83PkW9l2B5gUqeBkMr7f7nkV8QCdSUgo+2f34u0voOCljrEC/U0IW4zuGhufFbTZDmYbDSUDyAuNKW4sVQ1IlCNVTmzGI3N+WtMlUr4DsqmYHv8NeDxqZdAC1BsiG8tcsA0v3/wxoCCEKxuGsOjpaRFNUWSOigE9dBXtisfE10L1YHOaqxiHU+uKu5ZdFlM2ejTmq/B82akgTv/1M7mpLDbbrNXopSeX25ws/w8R9Svesuw7hoxAaGp5g74EOtHgrhhen0DRDFKeZMrv2DMlu7aR52Ne0aZh9m0LfCUa8pEoE21BPtqsIo6Gh/1F20tqysyDt99BEdkcGG3tefsjUhYq737rLGlASrtYvvcYjEGPPP+mntSXsTxFxzGXsjiDc9OOOP/q96zYHFJSsSPtNiQFdRUenn8y/C6Q5ykZCl09m0RXzIqKuIRofSpFF2INctX10vaeJknbtc57eG+nzsbQSF42OuFnQPFTivVUfW4+vvB77LWamk72jm8OGDHIHUolJebPsucIwKqruEBmDszvCtxQhbmPXN6yRSpWwd0FESwIHER/ZqA5h/RvFXp8mJHj4fePMDclHCuQuCLVDSOMa3fGc5HrElBxO/QbeQKJkNUrXndS35Eoas0PJp4qOM2UNplDGsBShwsmgCplanIkQ2mi2y4cvAtr1zZv/h55WeKNl0dvuqNzZRNEX8Z+EigMsc1KYLfaeBBab3SJC6H/upksyM2j14TcwfZJMkhtyYrn0gyg7aakAwyPG0S6Lg2QC2qs5AtAaY/jHuDHMGa4GPl9chLZCTYLmQFPg6vfyEhIiu2YqJFIVM0qyN3hazau4IzvjqAQ29GMBvamj4mwz1njQxdw1FPt8CQxPvixoXSNoAkc+EAXLSV38124cNFQanoVCW7BhqtLIKBrzY/ON18RCQG1johOnnIgw05hcbC6"
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "content": [
+              {
+                "type": "tool-result",
+                "toolCallId": "yKDNUHkLdsiYByGj",
+                "toolName": "getBasicAnalysis",
+                "output": {
+                  "type": "json",
+                  "value": {
+                    "specialStars": {
+                      "nobleman": [
+                        "亥",
+                        "酉"
+                      ],
+                      "intelligence": "酉",
+                      "skyHorse": "寅",
+                      "peachBlossom": "酉"
+                    },
+                    "elementCounts": {
+                      "WOOD": 12,
+                      "FIRE": 30,
+                      "EARTH": 40,
+                      "METAL": 14,
+                      "WATER": 4
+                    },
+                    "dayMaster": {
+                      "stem": "丁",
+                      "element": "FIRE",
+                      "nature": "Yin"
+                    },
+                    "strength": {
+                      "level": "Weak",
+                      "score": -45,
+                      "notes": [
+                        "Season (午 FIRE): +50 (Strong Companion Season)",
+                        "Hidden Year (戊 as Shang Guan): -10.0",
+                        "Hidden Year (乙 as Pian Yin): +12.0",
+                        "Hidden Year (癸 as Qi Sha): -15.0",
+                        "Hidden Month (己 as Shi Shen): -10.0",
+                        "Hidden Day (辛 as Pian Cai): -18.0 (Weighted)",
+                        "Hidden Hour (戊 as Shang Guan): -10.0",
+                        "Hidden Hour (辛 as Pian Cai): -12.0",
+                        "Stem Year (戊 as Shang Guan): -10",
+                        "Stem Month (戊 as Shang Guan): -10",
+                        "Stem Hour (庚 as Zheng Cai): -12"
+                      ]
+                    },
+                    "favorableElements": {
+                      "primary": [
+                        "WOOD",
+                        "FIRE"
+                      ],
+                      "secondary": [],
+                      "unfavorable": [
+                        "EARTH",
+                        "METAL",
+                        "WATER"
+                      ],
+                      "notes": [
+                        "DM Strength: Weak (Score: -45.0)",
+                        "Weak DM: Resource, Companion favorable."
+                      ]
+                    }
+                  }
+                },
+                "providerOptions": {
+                  "google": {
+                    "thoughtSignature": "CqwIAXLI2nyqhcBcxcAeRzRq4CzMmyj5n+kwuS+bI2FP/OcV4fwCCKaKJi9GeIZUSJPSNXO0R80EDiecBFcubm1ZiZtLJnScmvbHqv9zh6XcJ4GMDAijHtQ5kLs3CHtho2y7TSuZQ0ZShhLLupGATmqrrWvonD3+LpQE5TQIPg8P5FX0VJP3JbRE6svL2MhvBJq3TjfpoRfKkaylo5t+bRTRrrhx7LmvKyXybhwolqFgR37g+BFE40TCKSD/EhbLIYJjf0QZ2zrWIuFuJ1MVNjwkcRz+gpLZfHviuPVKosq5KB3K0QI8WT4/L/BxfE/hP7GEbpAZPor6MiEocUFQ9IZ2jU+pHKDjoQA0kGPWWbZzKb0i51Bgi4Pf6e1yv2HO97Oz34LL3NngvLuqr/an8DZ8xY5gXvWYCCgYh/gwSdKQQ1REVA7K11fYuYyLL3B8kuzuXjhM/ynCyOYTNEm/Rw5N/5IxFjCrbafA83PkW9l2B5gUqeBkMr7f7nkV8QCdSUgo+2f34u0voOCljrEC/U0IW4zuGhufFbTZDmYbDSUDyAuNKW4sVQ1IlCNVTmzGI3N+WtMlUr4DsqmYHv8NeDxqZdAC1BsiG8tcsA0v3/wxoCCEKxuGsOjpaRFNUWSOigE9dBXtisfE10L1YHOaqxiHU+uKu5ZdFlM2ejTmq/B82akgTv/1M7mpLDbbrNXopSeX25ws/w8R9Svesuw7hoxAaGp5g74EOtHgrhhen0DRDFKeZMrv2DMlu7aR52Ne0aZh9m0LfCUa8pEoE21BPtqsIo6Gh/1F20tqysyDt99BEdkcGG3tefsjUhYq737rLGlASrtYvvcYjEGPPP+mntSXsTxFxzGXsjiDc9OOOP/q96zYHFJSsSPtNiQFdRUenn8y/C6Q5ykZCl09m0RXzIqKuIRofSpFF2INctX10vaeJknbtc57eG+nzsbQSF42OuFnQPFTivVUfW4+vvB77LWamk72jm8OGDHIHUolJebPsucIwKqruEBmDszvCtxQhbmPXN6yRSpWwd0FESwIHER/ZqA5h/RvFXp8mJHj4fePMDclHCuQuCLVDSOMa3fGc5HrElBxO/QbeQKJkNUrXndS35Eoas0PJp4qOM2UNplDGsBShwsmgCplanIkQ2mi2y4cvAtr1zZv/h55WeKNl0dvuqNzZRNEX8Z+EigMsc1KYLfaeBBab3SJC6H/upksyM2j14TcwfZJMkhtyYrn0gyg7aakAwyPG0S6Lg2QC2qs5AtAaY/jHuDHMGa4GPl9chLZCTYLmQFPg6vfyEhIiu2YqJFIVM0qyN3hazau4IzvjqAQ29GMBvamj4mwz1njQxdw1FPt8CQxPvixoXSNoAkc+EAXLSV38124cNFQanoVCW7BhqtLIKBrzY/ON18RCQG1johOnnIgw05hcbC6"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "providerMetadata": {
+        "google": {
+          "promptFeedback": null,
+          "groundingMetadata": null,
+          "urlContextMetadata": null,
+          "safetyRatings": null,
+          "usageMetadata": {
+            "cachedContentTokenCount": 802,
+            "thoughtsTokenCount": 253,
+            "promptTokenCount": 1511,
+            "candidatesTokenCount": 10,
+            "totalTokenCount": 1774
+          }
+        }
+      }
+    }
+  ],
+  "usage": {
+    "inputTokens": 1511,
+    "inputTokenDetails": {
+      "noCacheTokens": 709,
+      "cacheReadTokens": 802
+    },
+    "outputTokens": 263,
+    "outputTokenDetails": {
+      "textTokens": 10,
+      "reasoningTokens": 253
+    },
+    "totalTokens": 1774,
+    "raw": {
+      "cachedContentTokenCount": 802,
+      "thoughtsTokenCount": 253,
+      "promptTokenCount": 1511,
+      "candidatesTokenCount": 10,
+      "totalTokenCount": 1774
+    },
+    "reasoningTokens": 253,
+    "cachedInputTokens": 802
+  },
+  "toolCalls": [
+    {
+      "type": "tool-call",
+      "toolCallId": "yKDNUHkLdsiYByGj",
+      "toolName": "getBasicAnalysis",
+      "input": {},
+      "providerMetadata": {
+        "google": {
+          "thoughtSignature": "CqwIAXLI2nyqhcBcxcAeRzRq4CzMmyj5n+kwuS+bI2FP/OcV4fwCCKaKJi9GeIZUSJPSNXO0R80EDiecBFcubm1ZiZtLJnScmvbHqv9zh6XcJ4GMDAijHtQ5kLs3CHtho2y7TSuZQ0ZShhLLupGATmqrrWvonD3+LpQE5TQIPg8P5FX0VJP3JbRE6svL2MhvBJq3TjfpoRfKkaylo5t+bRTRrrhx7LmvKyXybhwolqFgR37g+BFE40TCKSD/EhbLIYJjf0QZ2zrWIuFuJ1MVNjwkcRz+gpLZfHviuPVKosq5KB3K0QI8WT4/L/BxfE/hP7GEbpAZPor6MiEocUFQ9IZ2jU+pHKDjoQA0kGPWWbZzKb0i51Bgi4Pf6e1yv2HO97Oz34LL3NngvLuqr/an8DZ8xY5gXvWYCCgYh/gwSdKQQ1REVA7K11fYuYyLL3B8kuzuXjhM/ynCyOYTNEm/Rw5N/5IxFjCrbafA83PkW9l2B5gUqeBkMr7f7nkV8QCdSUgo+2f34u0voOCljrEC/U0IW4zuGhufFbTZDmYbDSUDyAuNKW4sVQ1IlCNVTmzGI3N+WtMlUr4DsqmYHv8NeDxqZdAC1BsiG8tcsA0v3/wxoCCEKxuGsOjpaRFNUWSOigE9dBXtisfE10L1YHOaqxiHU+uKu5ZdFlM2ejTmq/B82akgTv/1M7mpLDbbrNXopSeX25ws/w8R9Svesuw7hoxAaGp5g74EOtHgrhhen0DRDFKeZMrv2DMlu7aR52Ne0aZh9m0LfCUa8pEoE21BPtqsIo6Gh/1F20tqysyDt99BEdkcGG3tefsjUhYq737rLGlASrtYvvcYjEGPPP+mntSXsTxFxzGXsjiDc9OOOP/q96zYHFJSsSPtNiQFdRUenn8y/C6Q5ykZCl09m0RXzIqKuIRofSpFF2INctX10vaeJknbtc57eG+nzsbQSF42OuFnQPFTivVUfW4+vvB77LWamk72jm8OGDHIHUolJebPsucIwKqruEBmDszvCtxQhbmPXN6yRSpWwd0FESwIHER/ZqA5h/RvFXp8mJHj4fePMDclHCuQuCLVDSOMa3fGc5HrElBxO/QbeQKJkNUrXndS35Eoas0PJp4qOM2UNplDGsBShwsmgCplanIkQ2mi2y4cvAtr1zZv/h55WeKNl0dvuqNzZRNEX8Z+EigMsc1KYLfaeBBab3SJC6H/upksyM2j14TcwfZJMkhtyYrn0gyg7aakAwyPG0S6Lg2QC2qs5AtAaY/jHuDHMGa4GPl9chLZCTYLmQFPg6vfyEhIiu2YqJFIVM0qyN3hazau4IzvjqAQ29GMBvamj4mwz1njQxdw1FPt8CQxPvixoXSNoAkc+EAXLSV38124cNFQanoVCW7BhqtLIKBrzY/ON18RCQG1johOnnIgw05hcbC6"
+        }
+      }
+    }
+  ],
+  "finishReason": "tool-calls"
+}

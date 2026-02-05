@@ -1,0 +1,23 @@
+model Question {
+    id        String         @id @default(uuid())
+    type      QuestionType
+    status    QuestionStatus
+    input     Json // Stores: { scope, birthDateTime, gender, birthTimezone, isTimeKnown, ageRange, date? }
+    data      Json
+    expiresAt DateTime?
+    createdAt DateTime       @default(now())
+    updatedAt DateTime       @updatedAt
+}
+
+enum QuestionType {
+    personal
+    compatibility
+    daily
+}
+
+enum QuestionStatus {
+    pending
+    in_progress
+    completed
+    failed
+}

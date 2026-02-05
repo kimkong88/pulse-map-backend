@@ -5,6 +5,8 @@ model Report {
     code      String       @unique
     data      Json
     input     Json
+    userId    String?
+    user      User?        @relation(fields: [userId], references: [id])
     createdAt DateTime     @default(now())
     updatedAt DateTime     @updatedAt
 }
@@ -13,6 +15,7 @@ enum ReportType {
     personal
     compatibility
     forecast
+    forecast_14day
 }
 
 enum ReportStatus {

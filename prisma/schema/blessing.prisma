@@ -1,0 +1,19 @@
+model Blessing {
+    id           String   @id @default(uuid())
+    emoji        String // Predefined blessing type emoji
+    name         String // Predefined blessing type name
+    description  String // Predefined blessing type description
+    message      String? // Optional user message
+    receivedById String
+    receivedBy   User     @relation(fields: [receivedById], references: [id], name: "receivedBy")
+    sentById     String
+    sentBy       User     @relation(fields: [sentById], references: [id], name: "sentBy")
+    expiresAt    DateTime // Required: 24 hours from createdAt
+    createdAt    DateTime @default(now())
+    updatedAt    DateTime @updatedAt
+
+    @@index([receivedById, expiresAt]) // For querying active blessings
+    @@index([sentById, createdAt]) // For querying sent blessings history
+}
+
+// Note: Removed BlessingStatus enum - use expiresAt > now() to check if active

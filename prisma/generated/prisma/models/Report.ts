@@ -29,6 +29,7 @@ export type ReportMinAggregateOutputType = {
   type: $Enums.ReportType | null
   status: $Enums.ReportStatus | null
   code: string | null
+  userId: string | null
   createdAt: Date | null
   updatedAt: Date | null
 }
@@ -38,6 +39,7 @@ export type ReportMaxAggregateOutputType = {
   type: $Enums.ReportType | null
   status: $Enums.ReportStatus | null
   code: string | null
+  userId: string | null
   createdAt: Date | null
   updatedAt: Date | null
 }
@@ -49,6 +51,7 @@ export type ReportCountAggregateOutputType = {
   code: number
   data: number
   input: number
+  userId: number
   createdAt: number
   updatedAt: number
   _all: number
@@ -60,6 +63,7 @@ export type ReportMinAggregateInputType = {
   type?: true
   status?: true
   code?: true
+  userId?: true
   createdAt?: true
   updatedAt?: true
 }
@@ -69,6 +73,7 @@ export type ReportMaxAggregateInputType = {
   type?: true
   status?: true
   code?: true
+  userId?: true
   createdAt?: true
   updatedAt?: true
 }
@@ -80,6 +85,7 @@ export type ReportCountAggregateInputType = {
   code?: true
   data?: true
   input?: true
+  userId?: true
   createdAt?: true
   updatedAt?: true
   _all?: true
@@ -164,6 +170,7 @@ export type ReportGroupByOutputType = {
   code: string
   data: runtime.JsonValue
   input: runtime.JsonValue
+  userId: string | null
   createdAt: Date
   updatedAt: Date
   _count: ReportCountAggregateOutputType | null
@@ -196,8 +203,10 @@ export type ReportWhereInput = {
   code?: Prisma.StringFilter<"Report"> | string
   data?: Prisma.JsonFilter<"Report">
   input?: Prisma.JsonFilter<"Report">
+  userId?: Prisma.StringNullableFilter<"Report"> | string | null
   createdAt?: Prisma.DateTimeFilter<"Report"> | Date | string
   updatedAt?: Prisma.DateTimeFilter<"Report"> | Date | string
+  user?: Prisma.XOR<Prisma.UserNullableScalarRelationFilter, Prisma.UserWhereInput> | null
 }
 
 export type ReportOrderByWithRelationInput = {
@@ -207,8 +216,10 @@ export type ReportOrderByWithRelationInput = {
   code?: Prisma.SortOrder
   data?: Prisma.SortOrder
   input?: Prisma.SortOrder
+  userId?: Prisma.SortOrderInput | Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
+  user?: Prisma.UserOrderByWithRelationInput
 }
 
 export type ReportWhereUniqueInput = Prisma.AtLeast<{
@@ -221,8 +232,10 @@ export type ReportWhereUniqueInput = Prisma.AtLeast<{
   status?: Prisma.EnumReportStatusFilter<"Report"> | $Enums.ReportStatus
   data?: Prisma.JsonFilter<"Report">
   input?: Prisma.JsonFilter<"Report">
+  userId?: Prisma.StringNullableFilter<"Report"> | string | null
   createdAt?: Prisma.DateTimeFilter<"Report"> | Date | string
   updatedAt?: Prisma.DateTimeFilter<"Report"> | Date | string
+  user?: Prisma.XOR<Prisma.UserNullableScalarRelationFilter, Prisma.UserWhereInput> | null
 }, "id" | "code">
 
 export type ReportOrderByWithAggregationInput = {
@@ -232,6 +245,7 @@ export type ReportOrderByWithAggregationInput = {
   code?: Prisma.SortOrder
   data?: Prisma.SortOrder
   input?: Prisma.SortOrder
+  userId?: Prisma.SortOrderInput | Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
   _count?: Prisma.ReportCountOrderByAggregateInput
@@ -249,6 +263,7 @@ export type ReportScalarWhereWithAggregatesInput = {
   code?: Prisma.StringWithAggregatesFilter<"Report"> | string
   data?: Prisma.JsonWithAggregatesFilter<"Report">
   input?: Prisma.JsonWithAggregatesFilter<"Report">
+  userId?: Prisma.StringNullableWithAggregatesFilter<"Report"> | string | null
   createdAt?: Prisma.DateTimeWithAggregatesFilter<"Report"> | Date | string
   updatedAt?: Prisma.DateTimeWithAggregatesFilter<"Report"> | Date | string
 }
@@ -262,6 +277,7 @@ export type ReportCreateInput = {
   input: Prisma.JsonNullValueInput | runtime.InputJsonValue
   createdAt?: Date | string
   updatedAt?: Date | string
+  user?: Prisma.UserCreateNestedOneWithoutReportsInput
 }
 
 export type ReportUncheckedCreateInput = {
@@ -271,6 +287,7 @@ export type ReportUncheckedCreateInput = {
   code: string
   data: Prisma.JsonNullValueInput | runtime.InputJsonValue
   input: Prisma.JsonNullValueInput | runtime.InputJsonValue
+  userId?: string | null
   createdAt?: Date | string
   updatedAt?: Date | string
 }
@@ -284,6 +301,7 @@ export type ReportUpdateInput = {
   input?: Prisma.JsonNullValueInput | runtime.InputJsonValue
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  user?: Prisma.UserUpdateOneWithoutReportsNestedInput
 }
 
 export type ReportUncheckedUpdateInput = {
@@ -293,6 +311,7 @@ export type ReportUncheckedUpdateInput = {
   code?: Prisma.StringFieldUpdateOperationsInput | string
   data?: Prisma.JsonNullValueInput | runtime.InputJsonValue
   input?: Prisma.JsonNullValueInput | runtime.InputJsonValue
+  userId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
@@ -304,6 +323,7 @@ export type ReportCreateManyInput = {
   code: string
   data: Prisma.JsonNullValueInput | runtime.InputJsonValue
   input: Prisma.JsonNullValueInput | runtime.InputJsonValue
+  userId?: string | null
   createdAt?: Date | string
   updatedAt?: Date | string
 }
@@ -326,6 +346,7 @@ export type ReportUncheckedUpdateManyInput = {
   code?: Prisma.StringFieldUpdateOperationsInput | string
   data?: Prisma.JsonNullValueInput | runtime.InputJsonValue
   input?: Prisma.JsonNullValueInput | runtime.InputJsonValue
+  userId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
@@ -337,6 +358,7 @@ export type ReportCountOrderByAggregateInput = {
   code?: Prisma.SortOrder
   data?: Prisma.SortOrder
   input?: Prisma.SortOrder
+  userId?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
 }
@@ -346,6 +368,7 @@ export type ReportMaxOrderByAggregateInput = {
   type?: Prisma.SortOrder
   status?: Prisma.SortOrder
   code?: Prisma.SortOrder
+  userId?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
 }
@@ -355,12 +378,19 @@ export type ReportMinOrderByAggregateInput = {
   type?: Prisma.SortOrder
   status?: Prisma.SortOrder
   code?: Prisma.SortOrder
+  userId?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
 }
 
-export type StringFieldUpdateOperationsInput = {
-  set?: string
+export type ReportListRelationFilter = {
+  every?: Prisma.ReportWhereInput
+  some?: Prisma.ReportWhereInput
+  none?: Prisma.ReportWhereInput
+}
+
+export type ReportOrderByRelationAggregateInput = {
+  _count?: Prisma.SortOrder
 }
 
 export type EnumReportTypeFieldUpdateOperationsInput = {
@@ -371,8 +401,153 @@ export type EnumReportStatusFieldUpdateOperationsInput = {
   set?: $Enums.ReportStatus
 }
 
-export type DateTimeFieldUpdateOperationsInput = {
-  set?: Date | string
+export type ReportCreateNestedManyWithoutUserInput = {
+  create?: Prisma.XOR<Prisma.ReportCreateWithoutUserInput, Prisma.ReportUncheckedCreateWithoutUserInput> | Prisma.ReportCreateWithoutUserInput[] | Prisma.ReportUncheckedCreateWithoutUserInput[]
+  connectOrCreate?: Prisma.ReportCreateOrConnectWithoutUserInput | Prisma.ReportCreateOrConnectWithoutUserInput[]
+  createMany?: Prisma.ReportCreateManyUserInputEnvelope
+  connect?: Prisma.ReportWhereUniqueInput | Prisma.ReportWhereUniqueInput[]
+}
+
+export type ReportUncheckedCreateNestedManyWithoutUserInput = {
+  create?: Prisma.XOR<Prisma.ReportCreateWithoutUserInput, Prisma.ReportUncheckedCreateWithoutUserInput> | Prisma.ReportCreateWithoutUserInput[] | Prisma.ReportUncheckedCreateWithoutUserInput[]
+  connectOrCreate?: Prisma.ReportCreateOrConnectWithoutUserInput | Prisma.ReportCreateOrConnectWithoutUserInput[]
+  createMany?: Prisma.ReportCreateManyUserInputEnvelope
+  connect?: Prisma.ReportWhereUniqueInput | Prisma.ReportWhereUniqueInput[]
+}
+
+export type ReportUpdateManyWithoutUserNestedInput = {
+  create?: Prisma.XOR<Prisma.ReportCreateWithoutUserInput, Prisma.ReportUncheckedCreateWithoutUserInput> | Prisma.ReportCreateWithoutUserInput[] | Prisma.ReportUncheckedCreateWithoutUserInput[]
+  connectOrCreate?: Prisma.ReportCreateOrConnectWithoutUserInput | Prisma.ReportCreateOrConnectWithoutUserInput[]
+  upsert?: Prisma.ReportUpsertWithWhereUniqueWithoutUserInput | Prisma.ReportUpsertWithWhereUniqueWithoutUserInput[]
+  createMany?: Prisma.ReportCreateManyUserInputEnvelope
+  set?: Prisma.ReportWhereUniqueInput | Prisma.ReportWhereUniqueInput[]
+  disconnect?: Prisma.ReportWhereUniqueInput | Prisma.ReportWhereUniqueInput[]
+  delete?: Prisma.ReportWhereUniqueInput | Prisma.ReportWhereUniqueInput[]
+  connect?: Prisma.ReportWhereUniqueInput | Prisma.ReportWhereUniqueInput[]
+  update?: Prisma.ReportUpdateWithWhereUniqueWithoutUserInput | Prisma.ReportUpdateWithWhereUniqueWithoutUserInput[]
+  updateMany?: Prisma.ReportUpdateManyWithWhereWithoutUserInput | Prisma.ReportUpdateManyWithWhereWithoutUserInput[]
+  deleteMany?: Prisma.ReportScalarWhereInput | Prisma.ReportScalarWhereInput[]
+}
+
+export type ReportUncheckedUpdateManyWithoutUserNestedInput = {
+  create?: Prisma.XOR<Prisma.ReportCreateWithoutUserInput, Prisma.ReportUncheckedCreateWithoutUserInput> | Prisma.ReportCreateWithoutUserInput[] | Prisma.ReportUncheckedCreateWithoutUserInput[]
+  connectOrCreate?: Prisma.ReportCreateOrConnectWithoutUserInput | Prisma.ReportCreateOrConnectWithoutUserInput[]
+  upsert?: Prisma.ReportUpsertWithWhereUniqueWithoutUserInput | Prisma.ReportUpsertWithWhereUniqueWithoutUserInput[]
+  createMany?: Prisma.ReportCreateManyUserInputEnvelope
+  set?: Prisma.ReportWhereUniqueInput | Prisma.ReportWhereUniqueInput[]
+  disconnect?: Prisma.ReportWhereUniqueInput | Prisma.ReportWhereUniqueInput[]
+  delete?: Prisma.ReportWhereUniqueInput | Prisma.ReportWhereUniqueInput[]
+  connect?: Prisma.ReportWhereUniqueInput | Prisma.ReportWhereUniqueInput[]
+  update?: Prisma.ReportUpdateWithWhereUniqueWithoutUserInput | Prisma.ReportUpdateWithWhereUniqueWithoutUserInput[]
+  updateMany?: Prisma.ReportUpdateManyWithWhereWithoutUserInput | Prisma.ReportUpdateManyWithWhereWithoutUserInput[]
+  deleteMany?: Prisma.ReportScalarWhereInput | Prisma.ReportScalarWhereInput[]
+}
+
+export type ReportCreateWithoutUserInput = {
+  id?: string
+  type: $Enums.ReportType
+  status: $Enums.ReportStatus
+  code: string
+  data: Prisma.JsonNullValueInput | runtime.InputJsonValue
+  input: Prisma.JsonNullValueInput | runtime.InputJsonValue
+  createdAt?: Date | string
+  updatedAt?: Date | string
+}
+
+export type ReportUncheckedCreateWithoutUserInput = {
+  id?: string
+  type: $Enums.ReportType
+  status: $Enums.ReportStatus
+  code: string
+  data: Prisma.JsonNullValueInput | runtime.InputJsonValue
+  input: Prisma.JsonNullValueInput | runtime.InputJsonValue
+  createdAt?: Date | string
+  updatedAt?: Date | string
+}
+
+export type ReportCreateOrConnectWithoutUserInput = {
+  where: Prisma.ReportWhereUniqueInput
+  create: Prisma.XOR<Prisma.ReportCreateWithoutUserInput, Prisma.ReportUncheckedCreateWithoutUserInput>
+}
+
+export type ReportCreateManyUserInputEnvelope = {
+  data: Prisma.ReportCreateManyUserInput | Prisma.ReportCreateManyUserInput[]
+  skipDuplicates?: boolean
+}
+
+export type ReportUpsertWithWhereUniqueWithoutUserInput = {
+  where: Prisma.ReportWhereUniqueInput
+  update: Prisma.XOR<Prisma.ReportUpdateWithoutUserInput, Prisma.ReportUncheckedUpdateWithoutUserInput>
+  create: Prisma.XOR<Prisma.ReportCreateWithoutUserInput, Prisma.ReportUncheckedCreateWithoutUserInput>
+}
+
+export type ReportUpdateWithWhereUniqueWithoutUserInput = {
+  where: Prisma.ReportWhereUniqueInput
+  data: Prisma.XOR<Prisma.ReportUpdateWithoutUserInput, Prisma.ReportUncheckedUpdateWithoutUserInput>
+}
+
+export type ReportUpdateManyWithWhereWithoutUserInput = {
+  where: Prisma.ReportScalarWhereInput
+  data: Prisma.XOR<Prisma.ReportUpdateManyMutationInput, Prisma.ReportUncheckedUpdateManyWithoutUserInput>
+}
+
+export type ReportScalarWhereInput = {
+  AND?: Prisma.ReportScalarWhereInput | Prisma.ReportScalarWhereInput[]
+  OR?: Prisma.ReportScalarWhereInput[]
+  NOT?: Prisma.ReportScalarWhereInput | Prisma.ReportScalarWhereInput[]
+  id?: Prisma.StringFilter<"Report"> | string
+  type?: Prisma.EnumReportTypeFilter<"Report"> | $Enums.ReportType
+  status?: Prisma.EnumReportStatusFilter<"Report"> | $Enums.ReportStatus
+  code?: Prisma.StringFilter<"Report"> | string
+  data?: Prisma.JsonFilter<"Report">
+  input?: Prisma.JsonFilter<"Report">
+  userId?: Prisma.StringNullableFilter<"Report"> | string | null
+  createdAt?: Prisma.DateTimeFilter<"Report"> | Date | string
+  updatedAt?: Prisma.DateTimeFilter<"Report"> | Date | string
+}
+
+export type ReportCreateManyUserInput = {
+  id?: string
+  type: $Enums.ReportType
+  status: $Enums.ReportStatus
+  code: string
+  data: Prisma.JsonNullValueInput | runtime.InputJsonValue
+  input: Prisma.JsonNullValueInput | runtime.InputJsonValue
+  createdAt?: Date | string
+  updatedAt?: Date | string
+}
+
+export type ReportUpdateWithoutUserInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  type?: Prisma.EnumReportTypeFieldUpdateOperationsInput | $Enums.ReportType
+  status?: Prisma.EnumReportStatusFieldUpdateOperationsInput | $Enums.ReportStatus
+  code?: Prisma.StringFieldUpdateOperationsInput | string
+  data?: Prisma.JsonNullValueInput | runtime.InputJsonValue
+  input?: Prisma.JsonNullValueInput | runtime.InputJsonValue
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+}
+
+export type ReportUncheckedUpdateWithoutUserInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  type?: Prisma.EnumReportTypeFieldUpdateOperationsInput | $Enums.ReportType
+  status?: Prisma.EnumReportStatusFieldUpdateOperationsInput | $Enums.ReportStatus
+  code?: Prisma.StringFieldUpdateOperationsInput | string
+  data?: Prisma.JsonNullValueInput | runtime.InputJsonValue
+  input?: Prisma.JsonNullValueInput | runtime.InputJsonValue
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+}
+
+export type ReportUncheckedUpdateManyWithoutUserInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  type?: Prisma.EnumReportTypeFieldUpdateOperationsInput | $Enums.ReportType
+  status?: Prisma.EnumReportStatusFieldUpdateOperationsInput | $Enums.ReportStatus
+  code?: Prisma.StringFieldUpdateOperationsInput | string
+  data?: Prisma.JsonNullValueInput | runtime.InputJsonValue
+  input?: Prisma.JsonNullValueInput | runtime.InputJsonValue
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
 
 
@@ -384,8 +559,10 @@ export type ReportSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs =
   code?: boolean
   data?: boolean
   input?: boolean
+  userId?: boolean
   createdAt?: boolean
   updatedAt?: boolean
+  user?: boolean | Prisma.Report$userArgs<ExtArgs>
 }, ExtArgs["result"]["report"]>
 
 export type ReportSelectCreateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetSelect<{
@@ -395,8 +572,10 @@ export type ReportSelectCreateManyAndReturn<ExtArgs extends runtime.Types.Extens
   code?: boolean
   data?: boolean
   input?: boolean
+  userId?: boolean
   createdAt?: boolean
   updatedAt?: boolean
+  user?: boolean | Prisma.Report$userArgs<ExtArgs>
 }, ExtArgs["result"]["report"]>
 
 export type ReportSelectUpdateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetSelect<{
@@ -406,8 +585,10 @@ export type ReportSelectUpdateManyAndReturn<ExtArgs extends runtime.Types.Extens
   code?: boolean
   data?: boolean
   input?: boolean
+  userId?: boolean
   createdAt?: boolean
   updatedAt?: boolean
+  user?: boolean | Prisma.Report$userArgs<ExtArgs>
 }, ExtArgs["result"]["report"]>
 
 export type ReportSelectScalar = {
@@ -417,15 +598,27 @@ export type ReportSelectScalar = {
   code?: boolean
   data?: boolean
   input?: boolean
+  userId?: boolean
   createdAt?: boolean
   updatedAt?: boolean
 }
 
-export type ReportOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "type" | "status" | "code" | "data" | "input" | "createdAt" | "updatedAt", ExtArgs["result"]["report"]>
+export type ReportOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "type" | "status" | "code" | "data" | "input" | "userId" | "createdAt" | "updatedAt", ExtArgs["result"]["report"]>
+export type ReportInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  user?: boolean | Prisma.Report$userArgs<ExtArgs>
+}
+export type ReportIncludeCreateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  user?: boolean | Prisma.Report$userArgs<ExtArgs>
+}
+export type ReportIncludeUpdateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  user?: boolean | Prisma.Report$userArgs<ExtArgs>
+}
 
 export type $ReportPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   name: "Report"
-  objects: {}
+  objects: {
+    user: Prisma.$UserPayload<ExtArgs> | null
+  }
   scalars: runtime.Types.Extensions.GetPayloadResult<{
     id: string
     type: $Enums.ReportType
@@ -433,6 +626,7 @@ export type $ReportPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs
     code: string
     data: runtime.JsonValue
     input: runtime.JsonValue
+    userId: string | null
     createdAt: Date
     updatedAt: Date
   }, ExtArgs["result"]["report"]>
@@ -829,6 +1023,7 @@ readonly fields: ReportFieldRefs;
  */
 export interface Prisma__ReportClient<T, Null = never, ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs, GlobalOmitOptions = {}> extends Prisma.PrismaPromise<T> {
   readonly [Symbol.toStringTag]: "PrismaPromise"
+  user<T extends Prisma.Report$userArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.Report$userArgs<ExtArgs>>): Prisma.Prisma__UserClient<runtime.Types.Result.GetResult<Prisma.$UserPayload<ExtArgs>, T, "findUniqueOrThrow", GlobalOmitOptions> | null, null, ExtArgs, GlobalOmitOptions>
   /**
    * Attaches callbacks for the resolution and/or rejection of the Promise.
    * @param onfulfilled The callback to execute when the Promise is resolved.
@@ -864,6 +1059,7 @@ export interface ReportFieldRefs {
   readonly code: Prisma.FieldRef<"Report", 'String'>
   readonly data: Prisma.FieldRef<"Report", 'Json'>
   readonly input: Prisma.FieldRef<"Report", 'Json'>
+  readonly userId: Prisma.FieldRef<"Report", 'String'>
   readonly createdAt: Prisma.FieldRef<"Report", 'DateTime'>
   readonly updatedAt: Prisma.FieldRef<"Report", 'DateTime'>
 }
@@ -883,6 +1079,10 @@ export type ReportFindUniqueArgs<ExtArgs extends runtime.Types.Extensions.Intern
    */
   omit?: Prisma.ReportOmit<ExtArgs> | null
   /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.ReportInclude<ExtArgs> | null
+  /**
    * Filter, which Report to fetch.
    */
   where: Prisma.ReportWhereUniqueInput
@@ -901,6 +1101,10 @@ export type ReportFindUniqueOrThrowArgs<ExtArgs extends runtime.Types.Extensions
    */
   omit?: Prisma.ReportOmit<ExtArgs> | null
   /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.ReportInclude<ExtArgs> | null
+  /**
    * Filter, which Report to fetch.
    */
   where: Prisma.ReportWhereUniqueInput
@@ -918,6 +1122,10 @@ export type ReportFindFirstArgs<ExtArgs extends runtime.Types.Extensions.Interna
    * Omit specific fields from the Report
    */
   omit?: Prisma.ReportOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.ReportInclude<ExtArgs> | null
   /**
    * Filter, which Report to fetch.
    */
@@ -967,6 +1175,10 @@ export type ReportFindFirstOrThrowArgs<ExtArgs extends runtime.Types.Extensions.
    */
   omit?: Prisma.ReportOmit<ExtArgs> | null
   /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.ReportInclude<ExtArgs> | null
+  /**
    * Filter, which Report to fetch.
    */
   where?: Prisma.ReportWhereInput
@@ -1015,6 +1227,10 @@ export type ReportFindManyArgs<ExtArgs extends runtime.Types.Extensions.Internal
    */
   omit?: Prisma.ReportOmit<ExtArgs> | null
   /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.ReportInclude<ExtArgs> | null
+  /**
    * Filter, which Reports to fetch.
    */
   where?: Prisma.ReportWhereInput
@@ -1058,6 +1274,10 @@ export type ReportCreateArgs<ExtArgs extends runtime.Types.Extensions.InternalAr
    */
   omit?: Prisma.ReportOmit<ExtArgs> | null
   /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.ReportInclude<ExtArgs> | null
+  /**
    * The data needed to create a Report.
    */
   data: Prisma.XOR<Prisma.ReportCreateInput, Prisma.ReportUncheckedCreateInput>
@@ -1091,6 +1311,10 @@ export type ReportCreateManyAndReturnArgs<ExtArgs extends runtime.Types.Extensio
    */
   data: Prisma.ReportCreateManyInput | Prisma.ReportCreateManyInput[]
   skipDuplicates?: boolean
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.ReportIncludeCreateManyAndReturn<ExtArgs> | null
 }
 
 /**
@@ -1105,6 +1329,10 @@ export type ReportUpdateArgs<ExtArgs extends runtime.Types.Extensions.InternalAr
    * Omit specific fields from the Report
    */
   omit?: Prisma.ReportOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.ReportInclude<ExtArgs> | null
   /**
    * The data needed to update a Report.
    */
@@ -1157,6 +1385,10 @@ export type ReportUpdateManyAndReturnArgs<ExtArgs extends runtime.Types.Extensio
    * Limit how many Reports to update.
    */
   limit?: number
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.ReportIncludeUpdateManyAndReturn<ExtArgs> | null
 }
 
 /**
@@ -1171,6 +1403,10 @@ export type ReportUpsertArgs<ExtArgs extends runtime.Types.Extensions.InternalAr
    * Omit specific fields from the Report
    */
   omit?: Prisma.ReportOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.ReportInclude<ExtArgs> | null
   /**
    * The filter to search for the Report to update in case it exists.
    */
@@ -1198,6 +1434,10 @@ export type ReportDeleteArgs<ExtArgs extends runtime.Types.Extensions.InternalAr
    */
   omit?: Prisma.ReportOmit<ExtArgs> | null
   /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.ReportInclude<ExtArgs> | null
+  /**
    * Filter which Report to delete.
    */
   where: Prisma.ReportWhereUniqueInput
@@ -1218,6 +1458,25 @@ export type ReportDeleteManyArgs<ExtArgs extends runtime.Types.Extensions.Intern
 }
 
 /**
+ * Report.user
+ */
+export type Report$userArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  /**
+   * Select specific fields to fetch from the User
+   */
+  select?: Prisma.UserSelect<ExtArgs> | null
+  /**
+   * Omit specific fields from the User
+   */
+  omit?: Prisma.UserOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.UserInclude<ExtArgs> | null
+  where?: Prisma.UserWhereInput
+}
+
+/**
  * Report without action
  */
 export type ReportDefaultArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
@@ -1229,4 +1488,8 @@ export type ReportDefaultArgs<ExtArgs extends runtime.Types.Extensions.InternalA
    * Omit specific fields from the Report
    */
   omit?: Prisma.ReportOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.ReportInclude<ExtArgs> | null
 }

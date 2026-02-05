@@ -1,0 +1,125 @@
+{
+  "elementRelationship": {
+    "myElement": "FIRE-I",
+    "myElementEmoji": "🔥",
+    "todayElement": "EARTH-O",
+    "todayElementEmoji": "⛰️",
+    "meaning": "Today's EARTH-O energy challenges your FIRE-I nature. This isn't necessarily bad—it's asking you to adapt and be more strategic."
+  },
+  "dailyBranch": {
+    "character": "戌",
+    "animal": "Dog",
+    "emoji": "🐕",
+    "meaning": "Loyalty and protection are favored today. Commitment and standing by your values are supported."
+  },
+  "activeTenGods": [
+    {
+      "name": "Sharp Expression",
+      "technicalName": "Shang Guan",
+      "emoji": "✍️",
+      "source": "natal",
+      "pillar": "Year, Month",
+      "category": "output",
+      "strength": "amplified",
+      "occurrenceCount": 2
+    },
+    {
+      "name": "Stable Income",
+      "technicalName": "Zheng Cai",
+      "emoji": "💰",
+      "source": "natal",
+      "pillar": "Hour",
+      "category": "wealth",
+      "strength": "single",
+      "occurrenceCount": 1
+    },
+    {
+      "name": "Independence",
+      "technicalName": "Rob Wealth",
+      "emoji": "⚡",
+      "source": "transit",
+      "pillar": "Annual",
+      "category": "friend",
+      "strength": "single",
+      "occurrenceCount": 1
+    },
+    {
+      "name": "Opportunity",
+      "technicalName": "Indirect Wealth",
+      "emoji": "💸",
+      "source": "transit",
+      "pillar": "Monthly, Luck Era",
+      "category": "wealth",
+      "strength": "amplified",
+      "occurrenceCount": 2
+    }
+  ],
+  "reading": {
+    "paragraphs": [
+      "Today might feel like you're carrying a bit of extra weight, as the dominant Earth-O energy is asking your natural Fire-I warmth to consolidate and take things seriously. You might find yourself needing to slow down and manage responsibilities rather than charging ahead.",
+      "This energy can translate into a need to focus on practical matters, especially in your professional life where certain foundations might feel a bit shaky. There could be unexpected demands or a feeling that things are shifting beneath your feet, requiring careful attention to detail and a grounded approach.",
+      "You might also notice some internal friction, making it harder to freely express your ideas or feel entirely yourself. It's a day where self-doubt or hidden obstacles could surface, particularly when you're trying to be creative or connect with your past experiences.",
+      "However, there's also a silver lining with an 'Indirect Wealth' influence active. This means that while challenges are present, you might find surprising or unconventional solutions, especially when it comes to managing resources or finding new avenues for growth.",
+      "Even with the pressures, a harmonious connection to your ancestral roots can provide an inner sense of stability. This underlying support can help you feel more grounded, offering a quiet strength to navigate the day's demands.",
+      "Instead of pushing hard, try to adapt and find stability. This is a day for careful planning and solidifying your foundations, especially in areas that feel uncertain."
+    ],
+    "technicalBasis": [
+      "Daily Earth-O element controls Fire-I Day Master",
+      "things falling apart between ancestral roots and career foundation",
+      "subtle friction and hidden obstacles between core self and creative expression",
+      "Indirect Wealth energy active in current life cycle",
+      "harmonious partnership and mutual support between ancestral roots and core self"
+    ]
+  },
+  "theme": "Day of Foundation",
+  "subheading": "Acknowledge the need to consolidate your efforts and build strong foundations.",
+  "goodThings": [
+    {
+      "title": "Unconventional Resourcefulness",
+      "description": "Despite obstacles, today's 'Indirect Wealth' energy can spark creative ways to manage resources or find unexpected solutions, especially in business or career matters.",
+      "emoji": "💡",
+      "howToMaximize": "Be open to new ideas or alternative approaches for financial planning or project management. Look for opportunities outside the box, even if they seem unconventional.",
+      "technicalBasis": [
+        "Indirect Wealth energy active in current life cycle"
+      ]
+    },
+    {
+      "title": "Inner Stability from Roots",
+      "description": "You have an underlying supportive energy from your ancestral past, which can help you feel grounded and stable even amidst external pressures or internal doubts.",
+      "emoji": "🌳",
+      "howToMaximize": "Connect with your core values or reflect on past successes and family strengths to reinforce your inner resilience. Don't forget where you come from.",
+      "technicalBasis": [
+        "harmonious partnership and mutual support between ancestral roots and core self"
+      ]
+    }
+  ],
+  "challenges": [
+    {
+      "title": "Feeling Controlled or Restricted",
+      "description": "The dominant Earth-O energy might make you feel constrained, as if your usual energy or ideas are being held back. You might encounter demands that feel heavy or limiting.",
+      "emoji": "⛓️",
+      "whatToDo": "Practice patience and adaptability. Don't fight against the current; instead, look for ways to work within existing structures or patiently fulfill responsibilities.",
+      "technicalBasis": [
+        "Daily Earth-O element controls Fire-I Day Master"
+      ]
+    },
+    {
+      "title": "Obstacles in Career & Self-Expression",
+      "description": "You might face disruptions or a sense of instability regarding your professional foundations, and also subtle internal friction hindering your creative expression or sense of self.",
+      "emoji": "🚧",
+      "whatToDo": "Carefully review any professional plans or projects, paying attention to details. For creative endeavors, simplify your approach or seek quiet time for reflection before acting.",
+      "technicalBasis": [
+        "things falling apart between ancestral roots and career foundation",
+        "subtle friction and hidden obstacles between core self and creative expression"
+      ]
+    }
+  ],
+  "specialPatterns": [
+    {
+      "title": "Trinity Harmony Day",
+      "description": "Three powerful forces align today, creating exceptional synergy and transformation. This rare cosmic pattern brings unified strength and elemental harmony. Major opportunities for breakthrough and significant progress.",
+      "rarity": "1 in 12 days",
+      "emoji": "✨"
+    }
+  ]
+}

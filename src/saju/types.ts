@@ -887,16 +887,52 @@ export type ChapterReportUI = {
  * Structure: Multiple card sections focusing on human psychology
  * Goal: Engaging, shareable, focuses on behaviors not Bazi jargon
  */
+// Compatibility score levels (5-point scale)
+export type CompatibilityScore =
+  | 'Highly Compatible' // Strong natural alignment
+  | 'Compatible' // Good fit with some adjustments
+  | 'Neutral' // Mixed, depends on context
+  | 'Challenging' // Significant differences, requires effort
+  | 'Highly Challenging'; // Fundamental incompatibilities
+
+// Sub-category analysis structure
+export type CompatibilitySubCategory = {
+  title: string; // e.g., "Communication Style"
+  person1Analysis: string; // How person1 communicates (using "they/he/she" pronouns)
+  person2Analysis: string; // How person2 communicates (using "you" pronouns - requestor perspective)
+  result: {
+    score: CompatibilityScore; // 5-level score
+    match: string; // e.g., "Strong Match" or "Requires Attention"
+    analysis: string; // 2-3 sentences explaining the compatibility level and why
+    actionableTip?: string; // Optional: specific tip for this sub-category
+  };
+};
+
+// Category structure (4 categories × 4 sub-categories each)
+export type CompatibilityCategory = {
+  category: 'romance' | 'work' | 'lifestyle' | 'communication';
+  emoji: string; // e.g., "💕", "💼", "🏠", "💬"
+  title: string; // e.g., "Romance", "Work", "Lifestyle", "Communication"
+  subCategories: CompatibilitySubCategory[]; // Exactly 4 sub-categories
+};
+
 export type CompatibilityReport = {
   // --- METADATA ---
   // --- PAIRING TITLE (Report headline) ---
-  // Unique name for this specific pairing based on element interaction + dominant strength
   pairingTitle: {
     name: string; // e.g., "The Growth Dynamic"
     subtitle: string; // e.g., "Fire meets Wood in generative energy"
   };
 
-  // --- INTRODUCTION (Context for the scores) ---
+  // --- PAIRING EXPLANATION (Why this pairing is called this name) ---
+  // Similar to personal report's chart explanation - explains elemental distribution and interaction
+  pairingExplanation: {
+    summary: string; // One sentence summary
+    implications: string[]; // Array of implications (3-4 sentences)
+    soWhat: string; // Conclusion tying it all together
+  };
+
+  // --- INTRODUCTION (Context for the pairing) ---
   // Explains why this pairing got this title and what the element interaction means
   introduction: string; // 2-3 sentences explaining the pairing's core dynamic
 
@@ -910,6 +946,17 @@ export type CompatibilityReport = {
       element: string; // e.g., "Fire"
       polarity: string; // e.g., "Yin"
     };
+    // Element distribution chart (like personal report)
+    elementDistribution: {
+      elements: Array<{
+        element: string; // e.g., "FIRE", "EARTH"
+        count: number; // Count across 8 positions
+        percentage: number; // Percentage of total
+        emoji: string; // Element emoji
+      }>;
+      dominant: string[]; // Dominant elements
+      missing: string[]; // Missing elements
+    };
   };
 
   person2: {
@@ -920,18 +967,17 @@ export type CompatibilityReport = {
       element: string;
       polarity: string;
     };
-  };
-
-  // --- HERO SECTION ---
-  score: {
-    overall: number; // 0-100
-    rating:
-      | 'Highly Compatible'
-      | 'Compatible'
-      | 'Moderately Compatible'
-      | 'Challenging'
-      | 'Very Challenging';
-    headline: string; // e.g., "A Generative Partnership"
+    // Element distribution chart (like personal report)
+    elementDistribution: {
+      elements: Array<{
+        element: string; // e.g., "FIRE", "EARTH"
+        count: number; // Count across 8 positions
+        percentage: number; // Percentage of total
+        emoji: string; // Element emoji
+      }>;
+      dominant: string[]; // Dominant elements
+      missing: string[]; // Missing elements
+    };
   };
 
   rarity: {
@@ -940,9 +986,16 @@ export type CompatibilityReport = {
     description: string; // e.g., "Rarer than 99.97% of all pairings"
   };
 
-  // --- SHARED TRAITS (Pills/Tags) ---
-  // Quick visual indicators of commonalities
-  sharedTraits: string[]; // e.g., ["Intellectual curiosity", "Practical approach", "Value deep connections"]
+  // --- COMPATIBILITY ANALYSIS (4 categories × 4 sub-categories) ---
+  categories: CompatibilityCategory[]; // Exactly 4 categories: romance, work, lifestyle, communication
+
+  // --- OVERVIEW (LLM-Generated, synthesizes all categories) ---
+  // Generated AFTER all categories are complete, based on category results
+  overview: string; // 5-7 sentence synthesis, psychology-focused
+
+  // --- CONCLUSION (LLM-Generated, final summary) ---
+  // Generated together with overview in the same comprehensive prompt
+  conclusion: string; // 2-3 sentence conclusion summarizing the overall compatibility dynamic
 
   // --- SPECIAL CONNECTIONS (2-3 Cards) ---
   // Rare/unique things about this specific pairing
@@ -957,78 +1010,6 @@ export type CompatibilityReport = {
       | 'pattern-synergy';
     description: string; // 2-3 sentences, psychology-focused
   }>;
-
-  // --- HOW YOU WORK TOGETHER (2-3 Cards) ---
-  // Complementary dynamics that create synergy
-  dynamics: Array<{
-    title: string; // e.g., "Complementary Energies"
-    emoji: string; // e.g., "⚡"
-    person1Brings: string; // e.g., "Vision and intensity"
-    person2Brings: string; // e.g., "Execution and stability"
-    outcome: string; // e.g., "Together, you build something lasting"
-  }>;
-
-  // --- YOU BOTH... (2-3 Cards) ---
-  // Deeper behavioral/personality alignments
-  sharedBehaviors: Array<{
-    title: string; // e.g., "The type to dive deep into topics that interest you"
-    emoji: string; // e.g., "🔍"
-    description: string; // 2-3 sentences explaining the shared behavior
-    impact: string; // e.g., "Your curiosity feeds each other's intellectual growth"
-  }>;
-
-  // --- GROWTH TOGETHER (2 Cards) ---
-  // Challenges framed as growth opportunities
-  growthAreas: Array<{
-    title: string; // e.g., "Different Paces"
-    emoji: string; // e.g., "⏱️"
-    tension: string; // e.g., "You move in focused bursts; they prefer steady consistency"
-    opportunity: string; // e.g., "Learn to appreciate both sprint and marathon approaches"
-    outcome: string; // e.g., "Balanced momentum without burnout"
-  }>;
-
-  // --- YOUR DYNAMIC (LLM-Generated Overview) ---
-  // 5-7 sentence synthesis, psychology-focused
-  overview: string;
-
-  // --- SCORE BREAKDOWN (Top-level, visible immediately after hero) ---
-  // Casual, relationship-focused categories with technical basis hidden
-  scoreBreakdown: {
-    summary: {
-      overall: {
-        score: number; // e.g., 87
-        percentile: number; // e.g., 96 (better than 96% of pairings)
-        description: string; // e.g., "Better than 96% of pairings"
-      };
-      strongest: {
-        category: string; // e.g., "Work"
-        percentage: number; // e.g., 95
-        percentile: number; // e.g., 98
-        description: string; // e.g., "Exceptional collaboration potential"
-      };
-      weakest: {
-        category: string; // e.g., "Romance"
-        percentage: number; // e.g., 60
-        percentile: number; // e.g., 62
-        description: string; // e.g., "Above average, but room for growth"
-      };
-      text: string; // 2-3 sentence summary connecting it all
-    };
-    categories: Array<{
-      label: string; // e.g., "Romance"
-      emoji: string; // e.g., "💕"
-      score: number; // e.g., 10
-      max: number; // e.g., 25
-      percentage: number; // e.g., 40
-      percentile: number; // NEW: e.g., 62 (better than 62% of pairings)
-      description: string; // e.g., "Emotional chemistry & attraction"
-      technicalBasis: string; // e.g., "Marriage Palace (日支) interaction" - for "How is this calculated?" modal
-    }>;
-    total: {
-      score: number; // Overall score (e.g., 87)
-      max: number; // Always 100
-    };
-  };
 
   // --- CHART DISPLAY (Stacked cards showing Day Masters + full charts) ---
   chartDisplay: {

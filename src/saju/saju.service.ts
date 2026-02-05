@@ -1,42 +1,26 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import {
   BaziCalculator,
   PersonalizedDailyAnalysisOutput,
   CompleteAnalysis,
   ElementType,
+  InteractionDetail,
 } from '@aharris02/bazi-calculator-by-alvamind';
-import { addYears, addDays } from 'date-fns';
-import { toDate } from 'date-fns-tz';
+import { addYears, addDays} from 'date-fns';
+import { toDate, formatInTimeZone } from 'date-fns-tz';
 import { generateText, Output } from 'ai';
+import { z } from 'zod';
 import { BaziDataExtractor } from './utils/baziExtractor.util';
 import { ViewAggregator } from './utils/viewAggregator.util';
 import { LLMContextBuilder } from './utils/llmContextBuilder.util';
 import {
   RawBaziData,
   FortuneReport,
-  LLMPromptContext,
-  ChapterReportUI,
   UserContext,
   CompatibilityReport,
 } from './types';
-import {
-  generateTitlePrompt,
-  generateIntroductionPrompt as generateChapterIntroPrompt,
-  generateVibeCheckPrompt,
-  generateTurningPointsPrompt,
-  generateCheatSheetPrompt,
-  generateTakeawaysPrompt,
-} from './prompts/chapterReport.prompts';
 import { generateIntroductionPrompt } from './prompts/personalAnalysis.prompts';
 import { generateConclusionPrompt } from './prompts/conclusion.prompts';
-import {
-  titleOutputSchema,
-  introductionOutputSchema,
-  vibeCheckOutputSchema,
-  turningPointsOutputSchema,
-  cheatSheetOutputSchema,
-  takeawaysOutputSchema,
-} from './prompts/chapterReport.schemas';
 import { geminiClient } from '../utils/ai';
 import { WHO_YOU_ARE_TEMPLATES } from './templates/whoYouAre.templates';
 import {
@@ -47,7 +31,6 @@ import {
 } from './templates/technicalBasis.templates';
 import {
   getActiveSpecialStars,
-  ActiveSpecialStar,
 } from './templates/specialStars.templates';
 import {
   CORE_TRAITS,
@@ -70,10 +53,805 @@ import {
   LIFE_THEMES_TEMPLATES,
   LifeThemesTemplate,
 } from './templates/lifeThemes.templates';
+import { getLuckCycleTheme } from './utils/luckCycleThemes.util';
+import { extractActiveTenGods } from '../forecast/utils/activeTenGods.util';
 
 @Injectable()
 export class SajuService {
+  private readonly logger = new Logger(SajuService.name);
+
   constructor() {}
+
+  /**
+   * Get basic profile data for /me endpoint
+   * Fast, no LLM calls - only factual calculations
+   * Returns: identity, overall rarity, special traits
+   */
+  async getBasicProfile(
+    birthDateTime: Date,
+    gender: 'male' | 'female',
+    birthTimezone: string,
+    isTimeKnown: boolean,
+    currentTimezone?: string,
+  ) {
+    // Debug logging
+    this.logger.log('🔍 getBasicProfile inputs:');
+    this.logger.log(
+      JSON.stringify(
+        {
+          birthDateTime,
+          gender,
+          birthTimezone,
+          isTimeKnown,
+          currentTimezone,
+        },
+        null,
+        2,
+      ),
+    );
+
+    // Initialize calculator and build user context
+    const baseCalculator = new BaziCalculator(
+      birthDateTime,
+      gender,
+      birthTimezone,
+      isTimeKnown,
+    );
+    const baseAnalysis = baseCalculator.getCompleteAnalysis();
+
+    // Debug logging for Day Master
+    this.logger.log(
+      `🔍 Day Master: stem=${baseAnalysis?.detailedPillars?.day?.heavenlyStem}, branch=${baseAnalysis?.detailedPillars?.day?.earthlyBranch}`,
+    );
+
+    if (!baseAnalysis) {
+      throw new Error('SajuService: getCompleteAnalysis returned null.');
+    }
+
+    // Build user context (natal characteristics)
+    const userContext = BaziDataExtractor.buildUserContext(baseAnalysis);
+
+    // Generate identity (fast calculation, no LLM)
+    const identity = this.generateIdentity(userContext);
+    this.logger.log(`🔍 Generated identity: ${JSON.stringify(identity)}`);
+
+    // Get special traits (patterns + special stars)
+    const specialTraits = this.getSpecialTraits(userContext);
+    this.logger.log(`🔍 Special traits count: ${specialTraits.length}`);
+
+    // Calculate overall rarity
+    const elementDistribution = this.calculateElementDistribution(userContext);
+    const rarity = this.calculateRarity(
+      identity.code,
+      userContext,
+      elementDistribution,
+    );
+
+    // Get luck cycle themes (use currentTimezone if provided, otherwise use birthTimezone)
+    const luckCycles = await this.getLuckCycles(
+      birthDateTime,
+      gender,
+      birthTimezone,
+      isTimeKnown,
+      currentTimezone || birthTimezone,
+    );
+
+    return {
+      identity: {
+        code: identity.code,
+        title: identity.title,
+        element: identity.element,
+        polarity: identity.polarity,
+      },
+      rarity: {
+        oneIn: rarity.overall.oneIn,
+        description: rarity.overall.description,
+      },
+      specialTraits: specialTraits.map((trait) => ({
+        name: trait.name,
+        chineseName: trait.chineseName,
+        description: trait.description,
+        rarity: trait.rarity || 'Common',
+        emoji: trait.emoji,
+      })),
+      luckCycles,
+    };
+  }
+
+  /**
+   * Get current and next luck cycles with themes
+   * Returns: current luck cycle + next luck cycle, each with emoji, title, description, technical basis
+   */
+  async getLuckCycles(
+    birthDateTime: Date,
+    gender: 'male' | 'female',
+    birthTimezone: string,
+    isTimeKnown: boolean,
+    currentTimezone: string,
+  ) {
+    // Initialize calculator
+    const calculator = new BaziCalculator(
+      birthDateTime,
+      gender,
+      birthTimezone,
+      isTimeKnown,
+    );
+    const baseAnalysis = calculator.getCompleteAnalysis();
+
+    if (!baseAnalysis) {
+      throw new Error('SajuService: getCompleteAnalysis returned null.');
+    }
+
+    // Build user context for favorable elements and patterns
+    const userContext = BaziDataExtractor.buildUserContext(baseAnalysis);
+
+    // Get current date (needed for all cases)
+    const nowDate = new Date();
+    const currentYear = nowDate.getFullYear();
+
+    // Get all luck pillars
+    const allLuckPillars = baseAnalysis.luckPillars?.pillars || [];
+
+    if (allLuckPillars.length === 0) {
+      // Pre-Luck Era - no luck pillars yet
+      const currentTheme = getLuckCycleTheme({
+        tenGod: null,
+        stemElement: 'WOOD' as ElementType, // placeholder
+        branchLifeCycle: null,
+        favorableElements: userContext.favorableElements || {
+          primary: [],
+          secondary: [],
+          unfavorable: [],
+        },
+        natalPatterns: userContext.natalPatterns,
+        chartStrength: userContext.chartStrength,
+      });
+
+      // For Pre-Luck Era with no pillars, we can't calculate remaining time precisely
+      // Return zeros (this is a rare edge case)
+      return {
+        current: {
+          emoji: currentTheme.emoji,
+          title: currentTheme.title,
+          description: currentTheme.description,
+          remainingTime: { years: 0, months: 0, days: 0, hours: 0, minutes: 0 },
+          technicalBasis: [
+            'Pre-Luck Era: Major luck cycles (大運) have not yet begun',
+            'This period focuses on foundational development and early life experiences',
+          ],
+        },
+        next: null,
+      };
+    }
+
+    // Calculate current age to validate cycle detection
+    const currentAge = Math.floor((nowDate.getTime() - birthDateTime.getTime()) / (1000 * 60 * 60 * 24 * 365.25));
+    const birthYear = birthDateTime.getFullYear();
+    
+    // When time is unknown, the library doesn't populate yearStart/yearEnd for pillars 1-11
+    // We need to calculate approximate year ranges ourselves
+    // Typical pattern: Pillar 0 (Pre-Luck Era) lasts ~8-10 years, then each cycle is 10 years
+    // Estimate: Pillar 1 starts around age 8-10 (varies by birth timing)
+    // For approximation, we'll use age 8 as the start of Pillar 1
+    const estimatedFirstPillarStartAge = 8;
+    const estimatedFirstPillarStartYear = birthYear + estimatedFirstPillarStartAge;
+    
+    // Fill in missing yearStart/yearEnd for pillars when time is unknown
+    if (!isTimeKnown) {
+      for (let i = 1; i < allLuckPillars.length; i++) {
+        const pillar = allLuckPillars[i];
+        if (pillar.yearStart === null || pillar.yearEnd === null) {
+          // Calculate approximate year range: Pillar 1 starts at estimatedFirstPillarStartYear
+          // Each subsequent pillar starts 10 years later
+          const pillarStartYear = estimatedFirstPillarStartYear + (i - 1) * 10;
+          const pillarEndYear = pillarStartYear + 9; // 10-year cycle
+          // Note: We're modifying the pillar object directly - this is safe as it's a local copy
+          (pillar as any).yearStart = pillarStartYear;
+          (pillar as any).yearEnd = pillarEndYear;
+          // Also calculate approximate ageStart for consistency
+          (pillar as any).ageStart = estimatedFirstPillarStartAge + (i - 1) * 10;
+          this.logger.log(`📅 Estimated Pillar ${i}: ageStart=${(pillar as any).ageStart}, yearStart=${pillarStartYear}, yearEnd=${pillarEndYear}`);
+        }
+      }
+    }
+    
+    // Get current luck pillar using calculator (more complete data)
+    // Note: getCurrentLuckPillar may return null due to date comparison issues
+    // (library uses Jan 1 as endTime approximation, but cycles actually end exactly 10 years from startTime)
+    // Cycles don't start at birth - there's a Pre-Luck Era buffer, then each cycle lasts exactly 10 years
+    // We use age-based detection instead, which is more reliable
+    const currentLuckPillarFromCalc = calculator.getCurrentLuckPillar(nowDate);
+    
+    // Get daily analysis for today to extract correct Ten God and element (relative to Day Master)
+    // Note: currentLuckPillarSnap may not exist if getCurrentLuckPillar returns null
+    const todayAnalysis = calculator.getAnalysisForDate(nowDate, currentTimezone, {
+      type: 'personalized',
+    }) as PersonalizedDailyAnalysisOutput;
+    
+    // Debug: Log daily analysis structure
+    this.logger.log(`🔍 Daily Analysis Debug:`);
+    this.logger.log(`  - currentLuckPillarSnap exists: ${!!todayAnalysis?.currentLuckPillarSnap}`);
+    if (todayAnalysis?.currentLuckPillarSnap) {
+      this.logger.log(`  - tenGodVsNatalDayMaster: ${JSON.stringify(todayAnalysis.currentLuckPillarSnap.tenGodVsNatalDayMaster)}`);
+      this.logger.log(`  - stemElement: ${todayAnalysis.currentLuckPillarSnap.stemElement}`);
+    }
+    
+    // Extract Ten God and element from daily analysis (this is the correct way for luck pillars)
+    const currentTenGodFromDaily = todayAnalysis?.currentLuckPillarSnap?.tenGodVsNatalDayMaster?.name || null;
+    // Get element from currentLuckPillarSnap (this is the luck pillar's stem element)
+    const currentStemElementFromDaily = todayAnalysis?.currentLuckPillarSnap?.stemElement as ElementType | undefined;
+    
+    // Find current luck pillar index in array
+    let currentLuckPillar = null;
+    let currentIndex = -1;
+
+    // Debug: Log all pillars to understand structure
+    this.logger.log(`🔍 All Luck Pillars Debug:`);
+    this.logger.log(`  - Total pillars: ${allLuckPillars.length}`);
+    for (let i = 0; i < Math.min(allLuckPillars.length, 5); i++) {
+      const p = allLuckPillars[i];
+      this.logger.log(`  - Pillar ${i}: ageStart=${p.ageStart}, yearStart=${p.yearStart}, yearEnd=${p.yearEnd}, stem=${p.heavenlyStem?.character || 'null'}, branch=${p.earthlyBranch?.character || 'null'}`);
+    }
+
+    if (currentLuckPillarFromCalc) {
+      // Find matching pillar in array
+      for (let i = 0; i < allLuckPillars.length; i++) {
+        const pillar = allLuckPillars[i];
+        // Skip Pillar 0 (Pre-Luck Era) which has ageStart: null
+        if (pillar.ageStart === null || pillar.ageStart === undefined) {
+          continue;
+        }
+        if (
+          pillar.yearStart === currentLuckPillarFromCalc.yearStart &&
+          pillar.heavenlyStem?.character === currentLuckPillarFromCalc.heavenlyStem?.character &&
+          pillar.earthlyBranch?.character === currentLuckPillarFromCalc.earthlyBranch?.character
+        ) {
+          // Validate: current age must be within this cycle's age range
+          const pillarAgeEnd = pillar.ageStart + 9;
+          if (currentAge >= pillar.ageStart && currentAge <= pillarAgeEnd) {
+            // Use pillar from array (should have Ten God if library processed it)
+            // Only use currentLuckPillarFromCalc if array pillar doesn't have Ten God
+            currentLuckPillar = pillar.heavenlyStemTenGod ? pillar : currentLuckPillarFromCalc;
+            currentIndex = i;
+            this.logger.log(`✅ Found current pillar via calculator match: index ${i}, ageStart=${pillar.ageStart}`);
+            break;
+          }
+          // If age doesn't match, continue searching (calculator might be wrong)
+        }
+      }
+    }
+
+    // Fallback: find by age range if calculator didn't return or age didn't match
+    if (!currentLuckPillar) {
+      this.logger.log(`🔍 Searching by age range (currentAge=${currentAge})...`);
+      for (let i = 0; i < allLuckPillars.length; i++) {
+        const pillar = allLuckPillars[i];
+        // Skip Pillar 0 (Pre-Luck Era) which has ageStart: null
+        if (pillar.ageStart === null || pillar.ageStart === undefined) {
+          this.logger.log(`  - Skipping Pillar ${i} (ageStart is null)`);
+          continue;
+        }
+        const pillarAgeEnd = pillar.ageStart + 9;
+        // Check if current age is within this pillar's age range
+        if (currentAge >= pillar.ageStart && currentAge <= pillarAgeEnd) {
+          currentLuckPillar = pillar;
+          currentIndex = i;
+          this.logger.log(`✅ Found current pillar via age range: index ${i}, ageStart=${pillar.ageStart}, ageEnd=${pillarAgeEnd}`);
+          break;
+        } else {
+          this.logger.log(`  - Pillar ${i}: ageStart=${pillar.ageStart}, ageEnd=${pillarAgeEnd}, currentAge=${currentAge} (no match)`);
+        }
+      }
+    }
+    
+    // Additional fallback: find by year if age-based search didn't work
+    // When time is unknown, ageStart is null for all pillars except Pillar 0
+    // So we must use yearStart/yearEnd to find the current cycle
+    if (!currentLuckPillar) {
+      this.logger.log(`🔍 Searching by year (currentYear=${currentYear})...`);
+      for (let i = 0; i < allLuckPillars.length; i++) {
+        const pillar = allLuckPillars[i];
+        // Skip Pillar 0 (Pre-Luck Era) - it has ageStart=0, not null
+        // For time-unknown cases, pillars 1-11 have ageStart=null but yearStart/yearEnd are populated
+        if (i === 0 && pillar.ageStart === 0) {
+          this.logger.log(`  - Skipping Pillar 0 (Pre-Luck Era)`);
+          continue;
+        }
+        // Check if yearStart and yearEnd are valid (not null)
+        if (pillar.yearStart !== null && pillar.yearEnd !== null) {
+          if (
+            pillar.yearStart <= currentYear &&
+            currentYear <= pillar.yearEnd
+          ) {
+            currentLuckPillar = pillar;
+            currentIndex = i;
+            this.logger.log(`✅ Found current pillar via year range: index ${i}, yearStart=${pillar.yearStart}, yearEnd=${pillar.yearEnd}`);
+            break;
+          } else {
+            this.logger.log(`  - Pillar ${i}: yearStart=${pillar.yearStart}, yearEnd=${pillar.yearEnd}, currentYear=${currentYear} (no match)`);
+          }
+        } else {
+          this.logger.log(`  - Skipping Pillar ${i} (yearStart or yearEnd is null)`);
+        }
+      }
+    }
+
+    // If no current found, use first future pillar or last past pillar
+    if (!currentLuckPillar) {
+      this.logger.log(`🔍 No pillar found via age/year, checking if before first pillar...`);
+      // Check if we're before first luck pillar
+      if (allLuckPillars[0] && currentYear < allLuckPillars[0].yearStart) {
+        // Pre-Luck Era
+        const currentTheme = getLuckCycleTheme({
+          tenGod: null,
+          stemElement: 'WOOD' as ElementType,
+          branchLifeCycle: null,
+          favorableElements: userContext.favorableElements || {
+            primary: [],
+            secondary: [],
+            unfavorable: [],
+          },
+          natalPatterns: userContext.natalPatterns,
+          chartStrength: userContext.chartStrength,
+        });
+
+        const nextPillar = allLuckPillars[0];
+        const nextTenGod =
+          nextPillar.heavenlyStemTenGod?.name || null;
+        
+        // Calculate ageEnd (luck pillars are 10 years)
+        const nextAgeEnd = nextPillar.ageStart + 9; // ageStart to ageStart+9 = 10 years
+        
+        // Get life cycle from branch if available
+        const nextLifeCycle: string | null = 
+          (nextPillar.earthlyBranch as any)?.lifeCycle || null;
+        
+        const nextTheme = getLuckCycleTheme({
+          tenGod: nextTenGod,
+          stemElement: nextPillar.heavenlyStem?.elementType || 'WOOD',
+          branchLifeCycle: nextLifeCycle,
+          favorableElements: userContext.favorableElements || {
+            primary: [],
+            secondary: [],
+            unfavorable: [],
+          },
+          natalPatterns: userContext.natalPatterns,
+          chartStrength: userContext.chartStrength,
+        });
+
+        return {
+          current: {
+            emoji: currentTheme.emoji,
+            title: currentTheme.title,
+            description: currentTheme.description,
+            technicalBasis: [
+              `Pre-Luck Era: Major luck cycles begin at age ${nextPillar.ageStart}`,
+              `Next cycle: ${nextPillar.heavenlyStem?.character || ''}${nextPillar.earthlyBranch?.character || ''} (${nextTenGod || 'None'})`,
+              `Period: Age ${nextPillar.ageStart}-${nextAgeEnd} (${nextPillar.yearStart}-${nextPillar.yearEnd})`,
+            ],
+          },
+          next: {
+            emoji: nextTheme.emoji,
+            title: nextTheme.title,
+            description: nextTheme.description,
+            technicalBasis: [
+              `Luck Pillar: ${nextPillar.heavenlyStem?.character || ''}${nextPillar.earthlyBranch?.character || ''}`,
+              `Ten God: ${nextTenGod || 'None'}`,
+              `Element: ${nextPillar.heavenlyStem?.elementType || 'Unknown'}`,
+              `Period: Age ${nextPillar.ageStart}-${nextAgeEnd} (${nextPillar.yearStart}-${nextPillar.yearEnd})`,
+            ],
+          },
+        };
+      }
+
+      // Use last pillar if we're past all
+      this.logger.log(`🔍 Using last pillar as fallback: index ${allLuckPillars.length - 1}`);
+      currentLuckPillar = allLuckPillars[allLuckPillars.length - 1];
+      currentIndex = allLuckPillars.length - 1;
+      
+      // Safety check: if last pillar is Pillar 0 (ageStart: null), find the actual last real cycle
+      if (currentLuckPillar.ageStart === null || currentLuckPillar.ageStart === undefined) {
+        this.logger.error(`❌ ERROR: Last pillar is Pillar 0 (Pre-Luck Era) but person is age ${currentAge}! Finding last real cycle...`);
+        // Try to find the actual last real cycle
+        for (let i = allLuckPillars.length - 1; i >= 0; i--) {
+          if (allLuckPillars[i].ageStart !== null && allLuckPillars[i].ageStart !== undefined) {
+            this.logger.log(`✅ Found last real cycle: index ${i}, ageStart=${allLuckPillars[i].ageStart}`);
+            currentLuckPillar = allLuckPillars[i];
+            currentIndex = i;
+            break;
+          }
+        }
+      }
+    }
+    
+    // Final safety check: if we still have Pillar 0 for someone over age 10, force-correct it
+    if (currentLuckPillar && (currentLuckPillar.ageStart === null || currentLuckPillar.ageStart === undefined) && currentAge > 10) {
+      this.logger.error(`❌ ERROR: Selected Pillar 0 (Pre-Luck Era) for age ${currentAge}! Force-correcting...`);
+      // Force find by age - should always work if person is past Pre-Luck Era
+      for (let i = 1; i < allLuckPillars.length; i++) {
+        const pillar = allLuckPillars[i];
+        if (pillar.ageStart !== null && pillar.ageStart !== undefined) {
+          const pillarAgeEnd = pillar.ageStart + 9;
+          if (currentAge >= pillar.ageStart && currentAge <= pillarAgeEnd) {
+            this.logger.log(`✅ Force-corrected to pillar: index ${i}, ageStart=${pillar.ageStart}, ageEnd=${pillarAgeEnd}`);
+            currentLuckPillar = pillar;
+            currentIndex = i;
+            break;
+          }
+        }
+      }
+    }
+
+    // Get next luck pillar
+    const nextLuckPillar =
+      currentIndex < allLuckPillars.length - 1
+        ? allLuckPillars[currentIndex + 1]
+        : null;
+
+    // Calculate themes
+    // Use Ten God from daily analysis (more accurate - calculated relative to Day Master)
+    // If daily analysis doesn't have it, calculate using library's method (same as getAnalysisForDate does)
+    let currentTenGod = currentTenGodFromDaily;
+    
+    if (!currentTenGod) {
+      // Library calculates Ten God like this: analysisCalculator.calculateTenGod(dayMasterStem, luckPillarStem)
+      // Since getCurrentLuckPillar returns null, we'll calculate it ourselves using the same inputs
+      const dayMasterStem = baseAnalysis.detailedPillars?.day?.heavenlyStem;
+      const luckPillarStem = currentLuckPillar.heavenlyStem;
+      
+      if (dayMasterStem && luckPillarStem) {
+        // Try to access calculator's analysisCalculator (library's internal method)
+        // If accessible, use it; otherwise we'll need to debug why getCurrentLuckPillar fails
+        try {
+          const analysisCalculator = (calculator as any).analysisCalculator;
+          if (analysisCalculator && typeof analysisCalculator.calculateTenGod === 'function') {
+            const tenGodResult = analysisCalculator.calculateTenGod(dayMasterStem, luckPillarStem);
+            currentTenGod = tenGodResult?.name || null;
+            
+            // Handle case where Day Master and luck pillar stem are the same
+            // Library returns null for same stem (treats as "self"), but for luck pillars
+            // it should still be "Companion" (Bi Jian or Jie Cai based on Yin/Yang)
+            if (!currentTenGod && dayMasterStem.value === luckPillarStem.value) {
+              // Same stem = Companion relationship
+              // Same Yin/Yang = Bi Jian (Friend), Different = Jie Cai (Rob Wealth)
+              const sameYinYang = dayMasterStem.yinYang === luckPillarStem.yinYang;
+              currentTenGod = sameYinYang ? 'Bi Jian' : 'Jie Cai';
+              this.logger.log(`✅ Calculated Ten God (Companion): ${currentTenGod} for same stem ${dayMasterStem.character}`);
+            } else if (!currentTenGod) {
+              this.logger.warn(`Ten God calculation returned null for Day Master ${dayMasterStem.character} (${dayMasterStem.elementType}) and Luck Pillar ${luckPillarStem.character} (${luckPillarStem.elementType})`);
+            } else {
+              this.logger.log(`✅ Calculated Ten God: ${currentTenGod} for Day Master ${dayMasterStem.character} and Luck Pillar ${luckPillarStem.character}`);
+            }
+          } else {
+            this.logger.warn(`analysisCalculator.calculateTenGod is not accessible`);
+          }
+        } catch (error) {
+          this.logger.warn(`Could not access calculator.analysisCalculator: ${error}`);
+        }
+      } else {
+        this.logger.warn(`Missing Day Master or Luck Pillar stem: dayMasterStem=${!!dayMasterStem}, luckPillarStem=${!!luckPillarStem}`);
+      }
+      
+      // Final fallback to luck pillar's heavenlyStemTenGod (if library populated it)
+      if (!currentTenGod) {
+        currentTenGod = currentLuckPillar.heavenlyStemTenGod?.name || null;
+        if (currentTenGod) {
+          this.logger.log(`Using Ten God from luck pillar: ${currentTenGod}`);
+        }
+      }
+    } else {
+      this.logger.log(`Using Ten God from daily analysis: ${currentTenGod}`);
+    }
+    
+    // Special handling for Pillar 0 (Pre-Luck Era)
+    // Pillar 0 doesn't last 10 years - it lasts until Pillar 1 starts (typically around age 8)
+    const isPreLuckEra = currentIndex === 0 && currentLuckPillar.ageStart === 0;
+    let currentAgeEnd: number;
+    let cycleEndDate: Date;
+    
+    if (isPreLuckEra) {
+      // Pre-Luck Era ends when Pillar 1 starts
+      // Find Pillar 1 to get its start age
+      const nextPillar = allLuckPillars[1];
+      if (nextPillar && (nextPillar.ageStart !== null && nextPillar.ageStart !== undefined)) {
+        // Pillar 0 ends when Pillar 1 starts (at age nextPillar.ageStart)
+        currentAgeEnd = nextPillar.ageStart - 1;
+        cycleEndDate = addYears(birthDateTime, nextPillar.ageStart);
+        this.logger.log(`📅 Pre-Luck Era: ends at age ${nextPillar.ageStart} (when Pillar 1 starts)`);
+      } else {
+        // Fallback: if Pillar 1 doesn't have ageStart, estimate it as age 8
+        const estimatedPillar1StartAge = 8;
+        currentAgeEnd = estimatedPillar1StartAge - 1;
+        cycleEndDate = addYears(birthDateTime, estimatedPillar1StartAge);
+        this.logger.log(`📅 Pre-Luck Era: using estimated end at age ${estimatedPillar1StartAge}`);
+      }
+    } else {
+      // Regular luck pillars are 10 years
+      currentAgeEnd = currentLuckPillar.ageStart + 9; // ageStart to ageStart+9 = 10 years
+      // Cycle ends: birthDateTime + (ageEnd + 1) years (when person turns ageEnd + 1, i.e., starts next cycle)
+      cycleEndDate = addYears(birthDateTime, currentAgeEnd + 1);
+    }
+    
+    // Get life cycle from branch if available
+    // Note: lifeCycle may be on the branch object or need to be calculated
+    const currentLifeCycle: string | null = 
+      (currentLuckPillar.earthlyBranch as any)?.lifeCycle || null;
+    
+    // Use element from daily analysis if available (more accurate), otherwise fallback to luck pillar
+    // Priority: daily analysis > calculated luck pillar > array luck pillar
+    const currentStemElement = (currentStemElementFromDaily || 
+      currentLuckPillarFromCalc?.heavenlyStem?.elementType ||
+      currentLuckPillar.heavenlyStem?.elementType || 
+      'WOOD') as ElementType;
+    
+    // Final Ten God - calculated using library's method if not available from daily analysis
+    // For Pre-Luck Era, Ten God is typically null (no luck pillar yet)
+    const finalTenGod = isPreLuckEra ? null : currentTenGod;
+    
+    // Debug: If Ten God is null, check why (should not be null for luck pillars, but OK for Pre-Luck Era)
+    if (!finalTenGod && currentLuckPillar && !isPreLuckEra) {
+      const dayMasterStem = baseAnalysis.detailedPillars?.day?.heavenlyStem;
+      const luckPillarStem = currentLuckPillar.heavenlyStem;
+      this.logger.warn(`⚠️ Ten God is null! Day Master: ${dayMasterStem?.character || 'null'} (value: ${dayMasterStem?.value || 'null'}), Luck Pillar: ${luckPillarStem?.character || 'null'} (value: ${luckPillarStem?.value || 'null'})`);
+      this.logger.warn(`  - Stems are same value: ${dayMasterStem?.value === luckPillarStem?.value} (library returns null if same)`);
+      this.logger.warn(`  - This should be "Companion" (Bi Jian/Jie Cai) if same element but different stems`);
+    }
+    
+    const currentTheme = getLuckCycleTheme({
+      tenGod: finalTenGod,
+      stemElement: currentStemElement,
+      branchLifeCycle: currentLifeCycle,
+      favorableElements: userContext.favorableElements || {
+        primary: [],
+        secondary: [],
+        unfavorable: [],
+      },
+      natalPatterns: userContext.natalPatterns,
+      chartStrength: userContext.chartStrength,
+    });
+
+    // Calculate precise remaining time for current cycle
+    // For Pre-Luck Era: ends when Pillar 1 starts
+    // For regular cycles: ends at (ageEnd + 1) birthday
+    const cycleStartDate = addYears(birthDateTime, currentLuckPillar.ageStart);
+    
+    // Debug: Log cycle timing (especially for time-unknown cases)
+    if (!isTimeKnown) {
+      this.logger.log(`🔍 Cycle Timing Debug (time unknown):`);
+      this.logger.log(`  - Birth date: ${birthDateTime.toISOString()}`);
+      this.logger.log(`  - Current age: ${currentAge}`);
+      this.logger.log(`  - Cycle age range: ${currentLuckPillar.ageStart}-${currentAgeEnd}`);
+      this.logger.log(`  - Cycle start date: ${cycleStartDate.toISOString()}`);
+      this.logger.log(`  - Cycle end date: ${cycleEndDate.toISOString()}`);
+      this.logger.log(`  - Now date: ${nowDate.toISOString()}`);
+      this.logger.log(`  - Time until end: ${cycleEndDate.getTime() - nowDate.getTime()}ms`);
+    }
+    
+    // Calculate precise time difference (preserves hours/minutes/seconds)
+    let remainingTime = this.calculatePreciseTimeRemaining(nowDate, cycleEndDate);
+    
+    // Safety check: remaining time should never exceed 10 years for a 10-year cycle
+    // If it does, it means we're not actually in the cycle yet (detection issue)
+    // Cap it at 10 years max to prevent showing invalid data
+    if (remainingTime.years > 10 || (remainingTime.years === 10 && (remainingTime.months > 0 || remainingTime.days > 0 || remainingTime.hours > 0))) {
+      // If remaining time exceeds 10 years, we're likely before the cycle starts
+      // This shouldn't happen if currentLuckPillar detection is correct, but cap it
+      remainingTime = { years: 10, months: 0, days: 0, hours: 0, minutes: 0 };
+    }
+
+    // Build current technical basis
+    const currentTechnicalBasis = [
+      `Luck Pillar: ${currentLuckPillar.heavenlyStem?.character || ''}${currentLuckPillar.earthlyBranch?.character || ''}`,
+      `Ten God: ${currentTenGod || 'None'}`,
+      `Element: ${currentStemElement}`,
+      `Period: Age ${currentLuckPillar.ageStart}-${currentAgeEnd} (${currentLuckPillar.yearStart}-${currentLuckPillar.yearEnd})`,
+    ];
+
+    // Add element favorability note
+    const currentElementFavorability = this.getElementFavorabilityNote(
+      currentStemElement,
+      userContext.favorableElements,
+    );
+    if (currentElementFavorability) {
+      currentTechnicalBasis.push(currentElementFavorability);
+    }
+
+    // Format expireAt in user's current timezone for clarity
+    // This is when the current cycle ends, displayed in the user's current timezone
+    const expireAt = formatInTimeZone(
+      cycleEndDate,
+      currentTimezone,
+      "yyyy-MM-dd'T'HH:mm:ss",
+    );
+
+    const result: {
+      current: {
+        emoji: string;
+        title: string;
+        description: string;
+        remainingTime: {
+          years: number;
+          months: number;
+          days: number;
+          hours: number;
+          minutes: number;
+        };
+        expireAt: string; // ISO string in user's current timezone
+        technicalBasis: string[];
+      };
+      next: {
+        emoji: string;
+        title: string;
+        description: string;
+        technicalBasis: string[];
+      } | null;
+    } = {
+      current: {
+        emoji: currentTheme.emoji,
+        title: currentTheme.title,
+        description: currentTheme.description,
+        remainingTime,
+        expireAt,
+        technicalBasis: currentTechnicalBasis,
+      },
+      next: null,
+    };
+
+    // Add next luck cycle if available
+    if (nextLuckPillar) {
+      // Calculate Ten God for next pillar (same method as current pillar)
+      let nextTenGod = nextLuckPillar.heavenlyStemTenGod?.name || null;
+      
+      // If Ten God is not available from pillar, calculate it using library's method
+      if (!nextTenGod) {
+        const dayMasterStem = baseAnalysis.detailedPillars?.day?.heavenlyStem;
+        const nextLuckPillarStem = nextLuckPillar.heavenlyStem;
+        
+        if (dayMasterStem && nextLuckPillarStem) {
+          try {
+            const analysisCalculator = (calculator as any).analysisCalculator;
+            if (analysisCalculator && typeof analysisCalculator.calculateTenGod === 'function') {
+              const tenGodResult = analysisCalculator.calculateTenGod(dayMasterStem, nextLuckPillarStem);
+              nextTenGod = tenGodResult?.name || null;
+              
+              // Handle case where Day Master and next luck pillar stem are the same
+              if (!nextTenGod && dayMasterStem.value === nextLuckPillarStem.value) {
+                const sameYinYang = dayMasterStem.yinYang === nextLuckPillarStem.yinYang;
+                nextTenGod = sameYinYang ? 'Bi Jian' : 'Jie Cai';
+                this.logger.log(`✅ Calculated Ten God (Companion) for next pillar: ${nextTenGod} for same stem ${dayMasterStem.character}`);
+              } else if (nextTenGod) {
+                this.logger.log(`✅ Calculated Ten God for next pillar: ${nextTenGod} for Day Master ${dayMasterStem.character} and Next Luck Pillar ${nextLuckPillarStem.character}`);
+              }
+            }
+          } catch (error) {
+            this.logger.warn(`Could not calculate Ten God for next pillar: ${error}`);
+          }
+        }
+      }
+      
+      const nextAgeEnd = nextLuckPillar.ageStart + 9; // 10-year period
+      const nextLifeCycle: string | null = 
+        (nextLuckPillar.earthlyBranch as any)?.lifeCycle || null;
+      
+      const nextTheme = getLuckCycleTheme({
+        tenGod: nextTenGod,
+        stemElement: nextLuckPillar.heavenlyStem?.elementType || 'WOOD',
+        branchLifeCycle: nextLifeCycle,
+        favorableElements: userContext.favorableElements || {
+          primary: [],
+          secondary: [],
+          unfavorable: [],
+        },
+        natalPatterns: userContext.natalPatterns,
+        chartStrength: userContext.chartStrength,
+      });
+
+      const nextTechnicalBasis = [
+        `Luck Pillar: ${nextLuckPillar.heavenlyStem?.character || ''}${nextLuckPillar.earthlyBranch?.character || ''}`,
+        `Ten God: ${nextTenGod || 'None'}`,
+        `Element: ${nextLuckPillar.heavenlyStem?.elementType || 'Unknown'}`,
+        `Period: Age ${nextLuckPillar.ageStart}-${nextAgeEnd} (${nextLuckPillar.yearStart}-${nextLuckPillar.yearEnd})`,
+      ];
+
+      const nextElementFavorability = this.getElementFavorabilityNote(
+        nextLuckPillar.heavenlyStem?.elementType || 'WOOD',
+        userContext.favorableElements,
+      );
+      if (nextElementFavorability) {
+        nextTechnicalBasis.push(nextElementFavorability);
+      }
+
+      result.next = {
+        emoji: nextTheme.emoji,
+        title: nextTheme.title,
+        description: nextTheme.description,
+        technicalBasis: nextTechnicalBasis,
+      };
+    }
+
+    return result;
+  }
+
+  /**
+   * Calculate precise time remaining between two dates
+   * Returns: { years, months, days, hours, minutes }
+   * 
+   * Uses iterative subtraction to handle month/year boundaries correctly
+   */
+  private calculatePreciseTimeRemaining(
+    fromDate: Date,
+    toDate: Date,
+  ): { years: number; months: number; days: number; hours: number; minutes: number } {
+    // If toDate is in the past, return zeros
+    if (toDate <= fromDate) {
+      return { years: 0, months: 0, days: 0, hours: 0, minutes: 0 };
+    }
+
+    let tempDate = new Date(fromDate);
+    let years = 0;
+    let months = 0;
+    let days = 0;
+    let hours = 0;
+    let minutes = 0;
+
+    // Calculate years (iteratively add years until we exceed toDate)
+    while (true) {
+      const nextYear = addYears(tempDate, 1);
+      if (nextYear > toDate) break;
+      tempDate = nextYear;
+      years++;
+    }
+
+    // Calculate months (iteratively add months until we exceed toDate)
+    while (true) {
+      const nextMonth = new Date(tempDate);
+      nextMonth.setMonth(nextMonth.getMonth() + 1);
+      if (nextMonth > toDate) break;
+      tempDate = nextMonth;
+      months++;
+    }
+
+    // Calculate days (iteratively add days until we exceed toDate)
+    while (true) {
+      const nextDay = addDays(tempDate, 1);
+      if (nextDay > toDate) break;
+      tempDate = nextDay;
+      days++;
+    }
+
+    // Calculate remaining hours and minutes
+    const remainingMs = toDate.getTime() - tempDate.getTime();
+    hours = Math.floor(remainingMs / (1000 * 60 * 60));
+    const remainingMsAfterHours = remainingMs - (hours * 1000 * 60 * 60);
+    minutes = Math.floor(remainingMsAfterHours / (1000 * 60));
+
+    return { years, months, days, hours, minutes };
+  }
+
+  /**
+   * Helper: Get element favorability note for technical basis
+   */
+  private getElementFavorabilityNote(
+    element: ElementType,
+    favorableElements: {
+      primary: ElementType[];
+      secondary: ElementType[];
+      unfavorable: ElementType[];
+    } | null,
+  ): string | null {
+    if (!favorableElements) return null;
+
+    if (
+      favorableElements.primary.includes(element) ||
+      favorableElements.secondary.includes(element)
+    ) {
+      return `Element Favorability: Favorable (supports Day Master)`;
+    }
+    if (favorableElements.unfavorable.includes(element)) {
+      return `Element Favorability: Unfavorable (weakens Day Master)`;
+    }
+    return null;
+  }
 
   /**
    * Generate personal identity and introduction for natal report
@@ -190,7 +968,7 @@ export class SajuService {
    * - coreTrait: "Focused"
    * - visualMetaphor: "focused flame" (for image + intro reference)
    */
-  private generateIdentity(userContext: UserContext) {
+  generateIdentity(userContext: UserContext) {
     const dayMaster = userContext.natalStructure.personal.stem;
     const dayBranch = userContext.natalStructure.personal.branch;
 
@@ -294,7 +1072,7 @@ export class SajuService {
   /**
    * Get "Who You Are" content from templates
    */
-  private getWhoYouAreContent(
+  getWhoYouAreContent(
     typeCode: string,
     userContext: UserContext,
   ): {
@@ -307,8 +1085,22 @@ export class SajuService {
       throw new Error(`No template found for type: ${typeCode}`);
     }
 
+    // Calculate rarity dynamically (same logic as getBasicProfile)
+    const elementDistribution = this.calculateElementDistribution(userContext);
+    const rarity = this.calculateRarity(
+      typeCode,
+      userContext,
+      elementDistribution,
+    );
+    const rarityText = `1 in ${rarity.overall.oneIn.toLocaleString()}`;
+
+    // Replace {rarity} placeholder in paragraphs with actual calculated rarity
+    const paragraphs = template.paragraphs.map((para) =>
+      para.replace('{rarity}', rarityText),
+    );
+
     return {
-      paragraphs: template.paragraphs,
+      paragraphs,
     };
   }
 
@@ -927,6 +1719,60 @@ export class SajuService {
   }
 
   /**
+   * Format element distribution for compatibility report response
+   */
+  private formatElementDistributionForCompatibility(
+    elementDist: ReturnType<typeof this.calculateElementDistribution>,
+  ) {
+    const ELEMENT_EMOJI: Record<string, string> = {
+      WOOD: '🌳',
+      FIRE: '🔥',
+      EARTH: '⛰️',
+      METAL: '⚔️',
+      WATER: '💧',
+    };
+
+    const elements = [
+      {
+        element: 'WOOD',
+        count: elementDist.wood,
+        percentage: elementDist.percentages.wood,
+        emoji: ELEMENT_EMOJI.WOOD,
+      },
+      {
+        element: 'FIRE',
+        count: elementDist.fire,
+        percentage: elementDist.percentages.fire,
+        emoji: ELEMENT_EMOJI.FIRE,
+      },
+      {
+        element: 'EARTH',
+        count: elementDist.earth,
+        percentage: elementDist.percentages.earth,
+        emoji: ELEMENT_EMOJI.EARTH,
+      },
+      {
+        element: 'METAL',
+        count: elementDist.metal,
+        percentage: elementDist.percentages.metal,
+        emoji: ELEMENT_EMOJI.METAL,
+      },
+      {
+        element: 'WATER',
+        count: elementDist.water,
+        percentage: elementDist.percentages.water,
+        emoji: ELEMENT_EMOJI.WATER,
+      },
+    ].filter((e) => e.count > 0); // Only include elements that exist
+
+    return {
+      elements,
+      dominant: elementDist.dominant,
+      missing: elementDist.missing,
+    };
+  }
+
+  /**
    * Generate practical explanation of element distribution
    * Uses natural metaphors, avoids mystical terminology
    */
@@ -1026,7 +1872,7 @@ export class SajuService {
 
     try {
       const result = await generateText({
-        model: geminiClient('gemini-2.0-flash-exp'),
+        model: geminiClient('gemini-2.5-flash'),
         temperature: 0.7,
         experimental_telemetry: { isEnabled: true },
         messages: [
@@ -1092,7 +1938,7 @@ export class SajuService {
 
     try {
       const result = await generateText({
-        model: geminiClient('gemini-2.0-flash-exp'),
+        model: geminiClient('gemini-2.5-flash'),
         temperature: 0.7,
         experimental_telemetry: { isEnabled: true },
         messages: [
@@ -1463,1041 +2309,635 @@ export class SajuService {
   }
 
   /**
-   * Get chapter analysis (20-year life phase)
-   *
-   * Traditional Bazi Note:
-   * - Luck eras (大運) are 10-year periods in traditional Bazi
-   * - 20-year "chapters" align with Korean life phases (초년기, 중년기, 장년기, 노년기)
-   * - Each chapter = 2 luck eras, providing meaningful life phase aggregation
-   *
-   * Chapter mapping:
-   * - Chapter 1: 0-19 years (초년기 - Early Life)
-   * - Chapter 2: 20-39 years (중년기 - Middle Life)
-   * - Chapter 3: 40-59 years (장년기 - Prime Years)
-   * - Chapter 4: 60-79 years (노년기 - Later Life)
-   *
-   * Aggregation Strategy:
-   * - ONE API call: getAnalysisForDateRange(~7,300 days)
-   * - Full aggregation chain: Daily → Monthly → Yearly → Chapter
-   * - No sampling (to prevent LLM hallucination)
-   * - Performance measured and optimized as needed
+   * Generate pairing explanation - explains why this pairing is called this name
+   * Similar to generateChartMeaning but for compatibility pairs
+   * Explains elemental distribution and interaction in plain language
    */
-  /**
-   * Get weekly analysis (7 days) - FOR TESTING AGGREGATION
-   */
-  async getWeeklyAnalysis(
-    birthDateTime: Date,
-    gender: 'male' | 'female',
-    birthTimezone: string,
-    currentTimezone: string,
-    isTimeKnown: boolean,
-    startDate: Date, // Week start date
-  ): Promise<{ weeklyReport: FortuneReport; dailyReports: FortuneReport[] }> {
-    const startTime = Date.now();
+  private generatePairingExplanation(
+    pairingTitle: { name: string; subtitle: string },
+    identity1: ReturnType<typeof this.generateIdentity>,
+    identity2: ReturnType<typeof this.generateIdentity>,
+    elementDist1: ReturnType<typeof this.calculateElementDistribution>,
+    elementDist2: ReturnType<typeof this.calculateElementDistribution>,
+    elementInteraction: ReturnType<typeof this.calculateElementInteraction>,
+  ): {
+    summary: string;
+    implications: string[];
+    soWhat: string;
+  } {
+    const person1Dominant = elementDist1.dominant[0] || 'Balanced';
+    const person2Dominant = elementDist2.dominant[0] || 'Balanced';
+    const person1Missing = elementDist1.missing || [];
+    const person2Missing = elementDist2.missing || [];
 
-    // Suppress console during library calls
-    const originalLog = console.log;
-    const originalDebug = console.debug;
-    const originalWarn = console.warn;
-    const originalError = console.error;
+    // Build summary
+    const summary = `This pairing is called "${pairingTitle.name}" because ${elementInteraction.interactionType === 'Controlling' ? `${identity2.element} (you) controls ${identity1.element} (them), creating a dynamic where intensity refines structure` : elementInteraction.interactionType === 'Generative' ? `${identity1.element} (them) naturally supports ${identity2.element} (you), creating flowing growth` : elementInteraction.interactionType === 'Harmonious' ? `both share ${identity1.element} energy, creating natural resonance` : `your elemental energies interact in unique ways`}.`;
 
-    const ourLog = (...args: any[]) => originalLog(...args);
+    // Build implications
+    const implications: string[] = [];
 
-    console.log = () => {};
-    console.debug = () => {};
-    console.warn = () => {};
-    console.error = () => {};
+    // Element interaction implication
+    implications.push(elementInteraction.description);
 
-    try {
-      ourLog('\n========================================');
-      ourLog('🔍 WEEKLY ANALYSIS - DETAILED LOGGING');
-      ourLog('========================================\n');
-
-      // Initialize calculator
-      const baseCalculator = new BaziCalculator(
-        birthDateTime,
-        gender,
-        birthTimezone,
-        isTimeKnown,
-      );
-      const baseAnalysis = baseCalculator.getCompleteAnalysis();
-
-      if (!baseAnalysis) {
-        throw new Error('SajuService: getCompleteAnalysis returned null.');
-      }
-
-      // Calculate week end date (7 days)
-      const weekEndDate = addDays(startDate, 6);
-
-      ourLog(
-        `📅 Week: ${startDate.toISOString().split('T')[0]} to ${weekEndDate.toISOString().split('T')[0]}\n`,
-      );
-
-      // Generate daily reports for 7 days
-      const normalizedStart = toDate(startDate.toISOString().slice(0, 10), {
-        timeZone: currentTimezone,
-      });
-      const normalizedEnd = toDate(weekEndDate.toISOString().slice(0, 10), {
-        timeZone: currentTimezone,
-      });
-
-      const dailyAnalyses = baseCalculator.getAnalysisForDateRange(
-        normalizedStart,
-        normalizedEnd,
-        currentTimezone,
-        { type: 'personalized' },
-      ) as PersonalizedDailyAnalysisOutput[];
-
-      if (!dailyAnalyses || dailyAnalyses.length === 0) {
-        throw new Error('Failed to get daily analyses for week');
-      }
-
-      ourLog(`✅ Fetched ${dailyAnalyses.length} daily analyses\n`);
-
-      // Step 0: Build user context once (natal characteristics)
-      ourLog('🔧 Building User Context (natal characteristics)...');
-      const userContext = BaziDataExtractor.buildUserContext(baseAnalysis);
-      ourLog(`✅ User context built\n`);
-
-      // Step 1: Generate daily reports with logging
-      ourLog('📊 STEP 1: Generating Daily Reports');
-      ourLog('─────────────────────────────────────\n');
-
-      const dailyReports: FortuneReport[] = [];
-      for (let i = 0; i < dailyAnalyses.length; i++) {
-        const dailyAnalysis = dailyAnalyses[i];
-        const rawData = BaziDataExtractor.extract(userContext, dailyAnalysis);
-        const dailyReport = ViewAggregator.forDaily(
-          rawData,
-          baseAnalysis,
-          dailyAnalysis,
-          userContext.natalPatterns,
-        );
-
-        // Count context data
-        const totalTriggers = Object.values(rawData.lifeAreas).reduce(
-          (sum, area) => sum + (area.active ? area.triggers.length : 0),
-          0,
-        );
-        const activeAreas = Object.entries(rawData.lifeAreas).filter(
-          ([_, area]) => area.active,
-        ).length;
-        const favorableTriggers = Object.values(rawData.lifeAreas).reduce(
-          (sum, area) =>
-            sum +
-            (area.active
-              ? area.triggers.filter((t) => t.involvesFavorable).length
-              : 0),
-          0,
-        );
-        const unfavorableTriggers = Object.values(rawData.lifeAreas).reduce(
-          (sum, area) =>
-            sum +
-            (area.active
-              ? area.triggers.filter((t) => t.involvesUnfavorable).length
-              : 0),
-          0,
-        );
-
-        ourLog(
-          `Day ${i + 1} (${dailyReport.startDate.toISOString().split('T')[0]}):`,
-        );
-        ourLog(
-          `  Career:        Opp ${dailyReport.scores.career.opportunities} | Chal ${dailyReport.scores.career.challenges} | Net ${dailyReport.scores.career.net}`,
-        );
-        ourLog(
-          `  Wealth:        Opp ${dailyReport.scores.wealth.opportunities} | Chal ${dailyReport.scores.wealth.challenges} | Net ${dailyReport.scores.wealth.net}`,
-        );
-        ourLog(
-          `  Relationships: Opp ${dailyReport.scores.relationships.opportunities} | Chal ${dailyReport.scores.relationships.challenges} | Net ${dailyReport.scores.relationships.net}`,
-        );
-        ourLog(`  Overall:       Net ${dailyReport.scores.overall.net}`);
-        ourLog(
-          `  📦 Context:    ${totalTriggers} triggers (${favorableTriggers} fav, ${unfavorableTriggers} unfav), ${activeAreas}/4 areas active`,
-        );
-        ourLog(
-          `  🎨 Element:    ${rawData.dailyElement} ${rawData.favorableElements?.primary.includes(rawData.dailyElement) ? '✓ favorable' : rawData.favorableElements?.unfavorable.includes(rawData.dailyElement) ? '✗ unfavorable' : '○ neutral'}\n`,
-        );
-
-        dailyReports.push(dailyReport);
-      }
-
-      // Step 2: Aggregate to weekly with logging
-      ourLog('\n📊 STEP 2: Aggregating to Weekly');
-      ourLog('─────────────────────────────────────\n');
-
-      const weeklyReport = ViewAggregator.forWeekly(dailyReports);
-
-      // Calculate what was preserved vs averaged
-      const totalDailyTriggers = dailyReports.reduce((sum, day) => {
-        const dayTriggers = Object.values(
-          day.technicalBasis.rawTriggers,
-        ).reduce((s, area) => s + (area.active ? area.triggers.length : 0), 0);
-        return sum + dayTriggers;
-      }, 0);
-
-      const weeklyTriggers = Object.values(
-        weeklyReport.technicalBasis.rawTriggers,
-      ).reduce(
-        (sum, area) => sum + (area.active ? area.triggers.length : 0),
-        0,
-      );
-
-      const dailyNetScores = dailyReports.map((d) => d.scores.overall.net);
-      const avgDailyNet =
-        dailyNetScores.reduce((a, b) => a + b, 0) / dailyNetScores.length;
-
-      ourLog(`Weekly Aggregated Scores:`);
-      ourLog(
-        `  Career:        Opp ${weeklyReport.scores.career.opportunities} | Chal ${weeklyReport.scores.career.challenges} | Net ${weeklyReport.scores.career.net}`,
-      );
-      ourLog(
-        `  Wealth:        Opp ${weeklyReport.scores.wealth.opportunities} | Chal ${weeklyReport.scores.wealth.challenges} | Net ${weeklyReport.scores.wealth.net}`,
-      );
-      ourLog(
-        `  Relationships: Opp ${weeklyReport.scores.relationships.opportunities} | Chal ${weeklyReport.scores.relationships.challenges} | Net ${weeklyReport.scores.relationships.net}`,
-      );
-      ourLog(
-        `  Overall:       Net ${weeklyReport.scores.overall.net} (avg of daily: ${Math.round(avgDailyNet)})`,
-      );
-      ourLog(`\n  📦 Context Compression:`);
-      ourLog(
-        `     • Triggers: ${totalDailyTriggers} daily → ${weeklyTriggers} weekly (${weeklyTriggers === totalDailyTriggers ? 'ALL PRESERVED ✓' : 'AGGREGATED'})`,
-      );
-      ourLog(
-        `     • Lucky Symbols: ${dailyReports[0].luckySymbols.numbers.length} daily → ${weeklyReport.luckySymbols.numbers.length} weekly (deduplicated)`,
-      );
-      ourLog(
-        `     • Special Stars: ${dailyReports.reduce((s, d) => s + d.specialStars.length, 0)} total → ${weeklyReport.specialStars.length} weekly (deduplicated)\n`,
-      );
-
-      // Step 3: Context preservation analysis
-      ourLog('\n📊 STEP 3: Context Preservation Analysis');
-      ourLog('─────────────────────────────────────\n');
-
-      // Check for Luck Era transitions (대운 changes)
-      const hasLuckEraTransitions =
-        weeklyReport.technicalBasis.luckEraTransitions &&
-        weeklyReport.technicalBasis.luckEraTransitions.length > 1;
-
-      if (hasLuckEraTransitions) {
-        ourLog('🔄 LUCK ERA (大運/대운) TRANSITIONS DETECTED:');
-        weeklyReport.technicalBasis.luckEraTransitions!.forEach((era, i) => {
-          if (era.isPreLuckEra) {
-            ourLog(
-              `   Period ${i + 1}: Pre-Luck Era (before first 大運 starts)`,
-            );
-          } else {
-            ourLog(
-              `   Era ${i + 1}: ${era.luckEra?.tenGod || 'None'} (${era.luckEra?.stemElement || 'N/A'})`,
-            );
-          }
-          ourLog(
-            `             ${era.startDate.toISOString().split('T')[0]} to ${era.endDate.toISOString().split('T')[0]} (${era.daysInPeriod} days)`,
-          );
-        });
-        ourLog('\n');
-      } else {
-        const isPreEra = weeklyReport.technicalBasis.luckEra === null;
-        ourLog(
-          `🔄 LUCK ERA (大運/대운): ${isPreEra ? 'Pre-Luck Era (no 大運 yet)' : `${weeklyReport.technicalBasis.luckEra?.tenGod || 'None'} (stable throughout)`}\n`,
-        );
-      }
-
-      ourLog('✅ PRESERVED:');
-      ourLog(
-        '   • Day Master element & strength (in technicalBasis.dayMaster)',
-      );
-      ourLog(
-        '   • Natal structure Ten Gods (in technicalBasis.natalStructure)',
-      );
-      ourLog(
-        `   • Luck Era data ${hasLuckEraTransitions ? '+ TRANSITIONS tracked!' : '(single era)'}`,
-      );
-      ourLog('   • Favorable elements (in technicalBasis.favorableElements)');
-      ourLog('   • All triggers/interactions (in technicalBasis.rawTriggers)');
-      ourLog('   • Deduplicated lucky symbols');
-      ourLog('   • Deduplicated special stars');
-
-      ourLog('\n⚠️  AVERAGED (context compressed):');
-      ourLog(
-        `   • Scores: ${dailyReports.length} daily scores → 1 weekly average`,
-      );
-      ourLog(
-        `   • Element favorability: Daily variations → Single period element`,
-      );
-
-      ourLog('\n❌ LOST (cannot recover from weekly):');
-      ourLog('   • Specific dates of individual days');
-      ourLog('   • Day-to-day score fluctuations');
-      ourLog('   • Daily element changes');
-      ourLog('   • Hourly breakdowns (12 windows per day)');
-      ourLog('   • Trigger timing (which day had which trigger)');
-
-      ourLog('\n🎯 VERDICT:');
-      if (weeklyTriggers === totalDailyTriggers) {
-        ourLog(
-          '   ✓ All raw interaction data preserved - LLM can still access full context!',
-        );
-      } else {
-        ourLog(
-          `   ⚠️  Some triggers deduplicated (${totalDailyTriggers} → ${weeklyTriggers})`,
-        );
-      }
-      ourLog('   ✓ Scores averaged correctly - statistical summary intact');
-      ourLog(
-        '   ⚠️  Temporal granularity lost - cannot reconstruct daily timeline\n',
-      );
-
-      const totalTime = Date.now() - startTime;
-      ourLog(
-        `\n⏱️  TOTAL TIME: ${totalTime}ms (~${Math.round(totalTime / 1000)}s)`,
-      );
-      ourLog('========================================\n');
-
-      return { weeklyReport, dailyReports };
-    } finally {
-      console.log = originalLog;
-      console.debug = originalDebug;
-      console.warn = originalWarn;
-      console.error = originalError;
-    }
-  }
-
-  async getChapterAnalysis(
-    birthDateTime: Date,
-    gender: 'male' | 'female',
-    birthTimezone: string,
-    currentTimezone: string,
-    isTimeKnown: boolean,
-    chapter: 1 | 2 | 3 | 4,
-  ): Promise<any> {
-    const startTime = Date.now();
-
-    // Suppress ALL library console output during entire chapter analysis
-    const originalConsoleLog = console.log;
-    const originalConsoleWarn = console.warn;
-    const originalConsoleDebug = console.debug;
-    const originalConsoleError = console.error;
-
-    // Save a reference for our own logging
-    const ourLog = originalConsoleLog;
-
-    console.log = () => {}; // Silence console.log
-    console.warn = () => {}; // Silence console.warn
-    console.debug = () => {}; // Silence console.debug
-    console.error = () => {}; // Silence console.error
-
-    let dailyAnalyses: PersonalizedDailyAnalysisOutput[];
-    let baseAnalysis: CompleteAnalysis;
-    let baseCalculator: BaziCalculator;
-
-    try {
-      ourLog(`[Chapter ${chapter}] Fetching daily analyses...`);
-      const fetchStart = Date.now();
-
-      // Initialize calculator (library may log here)
-      baseCalculator = new BaziCalculator(
-        birthDateTime,
-        gender,
-        birthTimezone,
-        isTimeKnown,
-      );
-      baseAnalysis = baseCalculator.getCompleteAnalysis();
-
-      if (!baseAnalysis) {
-        throw new Error('SajuService: getCompleteAnalysis returned null.');
-      }
-
-      // Calculate chapter start/end dates
-      const chapterStartAge = (chapter - 1) * 20; // 0, 20, 40, 60
-      // For a 20-year chapter (e.g., ages 20-39), we need the day before the 40th birthday
-      const chapterStartDate = addYears(birthDateTime, chapterStartAge);
-      const chapterEndDate = addYears(birthDateTime, chapter * 20);
-      chapterEndDate.setDate(chapterEndDate.getDate() - 1); // Last day before next chapter
-
-      // ONE API call - get ALL daily analyses for 20 years (library may log here)
-      const normalizedStart = toDate(
-        chapterStartDate.toISOString().slice(0, 10),
-        { timeZone: currentTimezone },
-      );
-      const normalizedEnd = toDate(chapterEndDate.toISOString().slice(0, 10), {
-        timeZone: currentTimezone,
-      });
-
-      dailyAnalyses = baseCalculator.getAnalysisForDateRange(
-        normalizedStart,
-        normalizedEnd,
-        currentTimezone,
-        { type: 'personalized' },
-      ) as PersonalizedDailyAnalysisOutput[];
-
-      if (!dailyAnalyses || dailyAnalyses.length === 0) {
-        throw new Error('Failed to get daily analyses for chapter');
-      }
-
-      ourLog(
-        `[Chapter ${chapter}] Fetched ${dailyAnalyses.length} daily analyses in ${Date.now() - fetchStart}ms`,
-      );
-    } finally {
-      // Restore console BEFORE processing (so our logs show)
-      console.log = originalConsoleLog;
-      console.warn = originalConsoleWarn;
-      console.debug = originalConsoleDebug;
-      console.error = originalConsoleError;
+    // Shared dominant element (if both have same dominant)
+    if (person1Dominant === person2Dominant && person1Dominant !== 'Balanced') {
+      implications.push(`Both of you have ${person1Dominant} as your dominant element, which means you share a fundamental grounding in ${person1Dominant.toLowerCase()}-like qualities—${person1Dominant === 'EARTH' ? 'stability, practicality, and tangible results' : person1Dominant === 'FIRE' ? 'passion, intensity, and transformation' : person1Dominant === 'METAL' ? 'precision, structure, and refinement' : person1Dominant === 'WATER' ? 'adaptability, depth, and flow' : 'growth, expansion, and vision'}.`);
     }
 
-    // Step 0: Build user context once (natal characteristics)
-    const userContext = BaziDataExtractor.buildUserContext(baseAnalysis);
-
-    // Step 1: Generate ALL daily reports
-    console.log(`[Chapter ${chapter}] Generating daily reports...`);
-    const dailyStart = Date.now();
-
-    const dailyReports: FortuneReport[] = dailyAnalyses.map((dailyAnalysis) => {
-      // Fetch general analysis for first day of each month to get monthly/annual pillars
-      let generalAnalysis = null;
-      const date = new Date(dailyAnalysis.date);
-      if (date.getDate() === 1) {
-        // First day of month - fetch general analysis for pillars
-        generalAnalysis = baseCalculator.getAnalysisForDate(
-          date,
-          birthTimezone,
-          {
-            type: 'general',
-          },
-        );
-      }
-
-      const rawData = BaziDataExtractor.extract(
-        userContext,
-        dailyAnalysis,
-        generalAnalysis,
-      );
-      return ViewAggregator.forDaily(
-        rawData,
-        baseAnalysis,
-        dailyAnalysis,
-        userContext.natalPatterns,
-      );
-    });
-
-    console.log(
-      `[Chapter ${chapter}] Generated ${dailyReports.length} daily reports in ${Date.now() - dailyStart}ms`,
-    );
-
-    // TODO #1: Generate yearly sub-reports directly from daily (NEW APPROACH)
-    console.log(
-      `[Chapter ${chapter}] Generating yearly sub-reports from daily...`,
-    );
-    const yearlyStart = Date.now();
-
-    const chapterStartAge = (chapter - 1) * 20;
-    const chapterStartDate = addYears(birthDateTime, chapterStartAge);
-
-    // NEW: Use ViewAggregator.generateYearlySubReports directly from daily
-    const yearlyReports: FortuneReport[] =
-      ViewAggregator.generateYearlySubReports(dailyReports, chapterStartDate);
-
-    console.log(
-      `[Chapter ${chapter}] Generated ${yearlyReports.length} yearly reports in ${Date.now() - yearlyStart}ms`,
-    );
-
-    console.log(`   ✅ Generated ${yearlyReports.length} yearly sub-reports`);
-
-    // Step 4: Aggregate yearly → chapter
-    console.log(`[Chapter ${chapter}] Aggregating to chapter...`);
-    const chapterStart = Date.now();
-
-    const chapterReport = ViewAggregator.forChapter(yearlyReports);
-
-    console.log(
-      `[Chapter ${chapter}] Generated chapter report in ${Date.now() - chapterStart}ms`,
-    );
-
-    // Step 4.5: Build chart identity (TODO #4)
-    console.log(`[Chapter ${chapter}] Building chart identity...`);
-    const identityStart = Date.now();
-
-    // Use first daily analysis as representative
-    const representativeRawData = BaziDataExtractor.extract(
-      userContext,
-      dailyAnalyses[0],
-    );
-
-    const chartIdentity = ViewAggregator.buildChartIdentity(
-      dailyReports,
-      representativeRawData,
-      birthDateTime.getFullYear(),
-    );
-
-    // Add chart identity to chapter report's technical basis
-    chapterReport.technicalBasis.chartIdentity = chartIdentity;
-
-    console.log(
-      `[Chapter ${chapter}] Built chart identity in ${Date.now() - identityStart}ms`,
-    );
-
-    // 🧪 TODO #4 VALIDATION: Chart Identity (Condensed)
-    console.log('\n📊 Chart Identity:');
-    console.log(
-      `   ${chartIdentity.dayMaster.element} (${chartIdentity.dayMaster.yinYang}) | ${chartIdentity.chartStrength.strength} | ${chartIdentity.majorThemes.length} themes`,
-    );
-    console.log('');
-
-    // 🧪 TODO #8-11 VALIDATION: Heatmap Data
-    console.log('═'.repeat(80));
-    console.log('🧪 TODO #8-11: Heatmap Data Validation');
-    console.log('═'.repeat(80) + '\n');
-
-    if (chapterReport.heatmapData && chapterReport.heatmapData.length > 0) {
-      console.log('✅ Heatmap data generated successfully\n');
-      console.log('📊 Heatmap Summary:');
-      console.log(`   Total entries: ${chapterReport.heatmapData.length}`);
-      console.log(
-        `   Expected for chapter: 20 years (${chapterReport.heatmapData.length === 20 ? '✅ CORRECT' : '❌ INCORRECT'})`,
-      );
-      console.log(
-        `   Period format: "${chapterReport.heatmapData[0].period}" (yearly)`,
-      );
-      console.log(
-        `   Sample values: Opp=${chapterReport.heatmapData[0].opportunities.toFixed(1)} Chal=${chapterReport.heatmapData[0].challenges.toFixed(1)}`,
-      );
-
-      // Show ALL entries to check variation
-      console.log('\n   📋 All 20 yearly entries:');
-      chapterReport.heatmapData.forEach((entry, i) => {
-        const intensity = entry.opportunities + entry.challenges;
-        const net = entry.opportunities - entry.challenges;
-        console.log(
-          `      ${String(i + 1).padStart(2, ' ')}. ${entry.period}: Opp=${entry.opportunities.toFixed(1)} Chal=${entry.challenges.toFixed(1)} | Intensity=${intensity.toFixed(1)} Net=${net > 0 ? '+' : ''}${net.toFixed(1)}`,
-        );
-      });
-
-      // Statistical analysis
-      const allOpp = chapterReport.heatmapData.map((d) => d.opportunities);
-      const allChal = chapterReport.heatmapData.map((d) => d.challenges);
-      const oppRange = Math.max(...allOpp) - Math.min(...allOpp);
-      const chalRange = Math.max(...allChal) - Math.min(...allChal);
-
-      console.log('\n   📈 Score Variation Analysis:');
-      console.log(
-        `      Opportunities: Min=${Math.min(...allOpp).toFixed(1)} Max=${Math.max(...allOpp).toFixed(1)} Range=${oppRange.toFixed(1)}`,
-      );
-      console.log(
-        `      Challenges:    Min=${Math.min(...allChal).toFixed(1)} Max=${Math.max(...allChal).toFixed(1)} Range=${chalRange.toFixed(1)}`,
-      );
-      console.log(
-        `      ${oppRange > 10 || chalRange > 10 ? '✅ Good variation for heatmap' : '⚠️  Low variation - heatmap may look flat'}`,
-      );
-    } else {
-      console.log('❌ FAILED: No heatmap data generated');
+    // Missing elements (if both missing same)
+    const sharedMissing = person1Missing.filter((e) => person2Missing.includes(e));
+    if (sharedMissing.length > 0) {
+      const missingList = sharedMissing.join(' and ');
+      implications.push(`Neither of you has ${missingList} in your charts, which means you both benefit from bringing ${missingList.toLowerCase()}-like qualities into your relationship.`);
     }
 
-    console.log('\n✅ TODO #8-11 COMPLETE\n');
-    console.log('═'.repeat(80) + '\n');
+    // Build "so what" conclusion
+    const soWhat = `This is why you're "${pairingTitle.name}"—your elemental charts show ${person1Dominant === person2Dominant && person1Dominant !== 'Balanced' ? `shared ${person1Dominant.toLowerCase()} dominance` : `${identity1.element} meets ${identity2.element} in ${elementInteraction.interactionType.toLowerCase()} energy`}, and ${elementInteraction.description.toLowerCase()}.`;
 
-    // Build actual LLM context (not mocked)
-    const llmContext = LLMContextBuilder.buildContext(
-      chapterReport,
-      representativeRawData,
-      baseAnalysis,
-      dailyAnalyses[0],
-    );
-
-    console.log('🧠 LLM Context:');
-    console.log(
-      `   Chart Identity: ${llmContext.chartIdentity ? `✅ (${llmContext.chartIdentity.energyType})` : '❌ Missing'}`,
-    );
-    console.log('');
-
-    // Validate Ten God Context (Favorable & Unfavorable) - Only for Chapter 1 to reduce noise
-    if (chapter === 1) {
-      console.log('═'.repeat(80));
-      console.log('🧪 Ten God Context Validation (Favorable & Unfavorable)');
-      console.log('═'.repeat(80));
-
-      const categories = [
-        'career',
-        'wealth',
-        'relationships',
-        'wellness',
-        'personalGrowth',
-      ] as const;
-
-      for (const category of categories) {
-        const ctx = llmContext.tenGodContext[category];
-        console.log(`\n📊 ${category.toUpperCase()}`);
-        console.log(`   Net Favorability: ${ctx.netFavorability}`);
-        console.log(`   Summary: ${ctx.summary.substring(0, 100)}...`);
-
-        console.log(`\n   ✅ Favorable (${ctx.favorableTenGods.length}):`);
-        if (ctx.favorableTenGods.length === 0) {
-          console.log('      (none)');
-        } else {
-          for (const tg of ctx.favorableTenGods) {
-            console.log(`      - ${tg.star}`);
-            console.log(
-              `        Natal: ${tg.natalCount}x | Weight: ${tg.natalWeight} | Luck Era: ${tg.luckEraActive ? '🔥 ACTIVE' : 'inactive'}`,
-            );
-            console.log(`        Timing: ${tg.timing}`);
-          }
-        }
-
-        console.log(`\n   ⚠️  Unfavorable (${ctx.unfavorableTenGods.length}):`);
-        if (ctx.unfavorableTenGods.length === 0) {
-          console.log('      (none)');
-        } else {
-          for (const tg of ctx.unfavorableTenGods) {
-            console.log(`      - ${tg.star}`);
-            console.log(
-              `        Natal: ${tg.natalCount}x | Weight: ${tg.natalWeight} | Luck Era: ${tg.luckEraActive ? '🔥 ACTIVE' : 'inactive'}`,
-            );
-            console.log(`        Timing: ${tg.timing}`);
-          }
-        }
-        console.log('   ' + '─'.repeat(76));
-      }
-
-      console.log(
-        '\n✅ Ten God Context includes both favorable & unfavorable with industry-standard weighting',
-      );
-      console.log('═'.repeat(80) + '\n');
-    }
-
-    // 🧪 VALIDATION MODE: LLM Generation Disabled
-    console.log('⏸️  LLM generation skipped (validation mode)');
-    console.log('');
-
-    // Return minimal mock response for testing
     return {
-      _source: {
-        fortuneReport: chapterReport,
-        llmContext: llmContext, // Actual LLM context for validation
-      },
-      title: `Chapter ${chapter} (Validation Mode)`,
-      subtitle: 'Chart Identity Validation Complete',
-      keywords: [],
-      introduction: 'LLM generation disabled for validation.',
-      vibeCheck: {
-        introduction: 'N/A',
-        vibes: [],
-      },
-      turningPoints: {
-        introduction: 'N/A',
-        timeline: [],
-      },
-      chartInteraction: {
-        title: 'Who You Are',
-        content: chartIdentity.chartStrength.interpretation,
-      },
-      opportunities: {
-        title: 'Opportunities',
-        content: 'N/A (validation mode)',
-      },
-      challenges: { title: 'Challenges', content: 'N/A (validation mode)' },
-      advice: { title: 'Advice', content: 'N/A (validation mode)' },
-      significantPeriods: [],
-      cheatSheet: {
-        doList: [],
-        avoidList: [],
-      },
-      takeaways: 'Validation mode - LLM disabled',
-      metadata: {
-        ageRange: `${(chapter - 1) * 20}-${chapter * 20 - 1}`,
-        generatedAt: new Date().toISOString(),
-      },
+      summary,
+      implications,
+      soWhat,
     };
-
-    /* 🧪 COMMENTED OUT FOR VALIDATION - Uncomment when ready to test LLM
-    // Step 5: Build comprehensive LLM context
-    console.log(`[Chapter ${chapter}] Building LLM context...`);
-    const llmStart = Date.now();
-
-    const llmContext = LLMContextBuilder.buildContext(
-      chapterReport,
-      representativeRawData,
-      baseAnalysis,
-      dailyAnalyses[0],
-    );
-
-    console.log(
-      `[Chapter ${chapter}] Built LLM context in ${Date.now() - llmStart}ms`,
-    );
-
-    // Step 6: Generate UI with LLM using REAL data
-    console.log(`[Chapter ${chapter}] Generating LLM report...`);
-    const aiStart = Date.now();
-
-    const ageStart = (chapter - 1) * 20;
-
-    // Build context from REAL aggregated data
-    // Extract top categories
-    const topCategoryEntries = Object.entries(chapterReport.scores)
-      .filter(([key]) => key !== 'overall')
-      .sort(([, a], [, b]) => b.net - a.net)
-      .slice(0, 2);
-
-    const topCategories = topCategoryEntries.map(
-      ([key]) => key.charAt(0).toUpperCase() + key.slice(1),
-    );
-
-    // Extract Luck Era transitions for context
-    const birthYear = birthDateTime.getFullYear();
-    const luckEraTransitions =
-      chapterReport.technicalBasis.luckEraTransitions?.map((transition) => {
-        const age = transition.startDate.getFullYear() - birthYear;
-        return {
-          age,
-          tenGod: transition.luckEra?.tenGod || null,
-          element: transition.luckEra?.stemElement || 'Unknown',
-          isPreLuckEra: transition.isPreLuckEra,
-        };
-      }) || [];
-
-    // Extract top category Ten Gods from LLM context
-    const topCategoryTenGods: { [key: string]: string | null } = {};
-    for (const [categoryKey] of topCategoryEntries) {
-      const categoryContext = llmContext.tenGodContext[categoryKey];
-      if (categoryContext?.natal) {
-        const categoryName =
-          categoryKey.charAt(0).toUpperCase() + categoryKey.slice(1);
-        topCategoryTenGods[categoryName] = categoryContext.natal;
-      }
-    }
-
-    // Extract key interactions (top 3 most frequent)
-    const keyInteractions: string[] = [];
-    if (chapterReport.aggregationMetadata?.triggerPatterns) {
-      keyInteractions.push(
-        ...chapterReport.aggregationMetadata.triggerPatterns
-          .slice(0, 3)
-          .map((pattern) => pattern.type),
-      );
-    }
-
-    const simpleContext = {
-      ageRange: `Ages ${ageStart}-${ageStart + 19}`,
-      overallScore: chapterReport.scores.overall.net,
-      opportunities: chapterReport.scores.overall.opportunities,
-      challenges: chapterReport.scores.overall.challenges,
-      topCategories,
-      mainElement: chapterReport.technicalBasis.dayMaster.element,
-      favorableElements:
-        chapterReport.technicalBasis.favorableElements?.primary || [],
-      dominantVibe:
-        chapterReport.scores.overall.net > 60
-          ? ('growth' as const)
-          : chapterReport.scores.overall.net < 40
-            ? ('challenge' as const)
-            : ('balance' as const),
-      // 🔧 RICH BAZI CONTEXT (For Technical Basis)
-      baziDetails: {
-        dayMaster: {
-          element: llmContext.dayMaster.element,
-          yinYang: llmContext.dayMaster.yinYang,
-          chineseName: llmContext.dayMaster.chineseName,
-        },
-        natalPillars: {
-          year: {
-            tenGod: chapterReport.technicalBasis.natalStructure.social.tenGod,
-            element:
-              chapterReport.technicalBasis.natalStructure.social.element ||
-              'Unknown',
-          },
-          month: {
-            tenGod: chapterReport.technicalBasis.natalStructure.career.tenGod,
-            element:
-              chapterReport.technicalBasis.natalStructure.career.element ||
-              'Unknown',
-          },
-          day: {
-            tenGod: chapterReport.technicalBasis.natalStructure.personal.tenGod,
-            element:
-              chapterReport.technicalBasis.natalStructure.personal.element ||
-              'Unknown',
-          },
-          hour: {
-            tenGod:
-              chapterReport.technicalBasis.natalStructure.innovation.tenGod,
-            element:
-              chapterReport.technicalBasis.natalStructure.innovation.element ||
-              'Unknown',
-          },
-        },
-        luckEraTransitions:
-          luckEraTransitions.length > 0 ? luckEraTransitions : undefined,
-        topCategoryTenGods,
-        keyInteractions:
-          keyInteractions.length > 0 ? keyInteractions : undefined,
-      },
-    };
-
-    console.log(`\n[Chapter ${chapter}] 🎯 CONTEXT FOR LLM:`);
-    console.log(`\n   📊 Basic Context:`);
-    console.log(`      - Day Master: ${simpleContext.mainElement}`);
-    console.log(
-      `      - Favorable Elements: ${simpleContext.favorableElements.join(', ') || 'None'}`,
-    );
-    console.log(
-      `      - Top Categories: ${simpleContext.topCategories.join(', ')}`,
-    );
-    console.log(
-      `      - Overall Score: ${simpleContext.overallScore} (Opp: ${simpleContext.opportunities}, Chal: ${simpleContext.challenges})`,
-    );
-    console.log(`      - Dominant Vibe: ${simpleContext.dominantVibe}`);
-
-    console.log(`\n   🔧 Rich Bazi Context:`);
-    console.log(
-      `      - Day Master: ${simpleContext.baziDetails.dayMaster.chineseName} (${simpleContext.baziDetails.dayMaster.yinYang} ${simpleContext.baziDetails.dayMaster.element})`,
-    );
-    console.log(`      - Natal Pillars:`);
-    console.log(
-      `         Year (Social): ${simpleContext.baziDetails.natalPillars.year.tenGod || 'N/A'} (${simpleContext.baziDetails.natalPillars.year.element})`,
-    );
-    console.log(
-      `         Month (Career): ${simpleContext.baziDetails.natalPillars.month.tenGod || 'N/A'} (${simpleContext.baziDetails.natalPillars.month.element})`,
-    );
-    console.log(
-      `         Day (Personal): ${simpleContext.baziDetails.natalPillars.day.tenGod || 'N/A'} (${simpleContext.baziDetails.natalPillars.day.element})`,
-    );
-    console.log(
-      `         Hour (Innovation): ${simpleContext.baziDetails.natalPillars.hour.tenGod || 'N/A'} (${simpleContext.baziDetails.natalPillars.hour.element})`,
-    );
-    if (simpleContext.baziDetails.luckEraTransitions) {
-      console.log(`      - Luck Era Transitions:`);
-      simpleContext.baziDetails.luckEraTransitions.forEach((trans) => {
-        console.log(
-          `         Age ${trans.age}: ${trans.isPreLuckEra ? '🌱 Pre-Luck Era' : trans.tenGod} (${trans.element})`,
-        );
-      });
-    }
-    console.log(`      - Top Category Ten Gods:`);
-    Object.entries(simpleContext.baziDetails.topCategoryTenGods).forEach(
-      ([category, tenGod]) => {
-        console.log(`         ${category}: ${tenGod || 'N/A'}`);
-      },
-    );
-    if (simpleContext.baziDetails.keyInteractions) {
-      console.log(
-        `      - Key Interactions: ${simpleContext.baziDetails.keyInteractions.join(', ')}`,
-      );
-    }
-
-    // DEBUG: Check raw library data
-    console.log(
-      `\n[Chapter ${chapter}] 🔍 RAW LIBRARY DATA (用神 Yong Shen Analysis):`,
-    );
-    console.log(`   - Day Master: ${simpleContext.mainElement}`);
-    console.log(
-      `   - Favorable Elements (Primary): ${chapterReport.technicalBasis.favorableElements?.primary.join(', ') || 'None'}`,
-    );
-    console.log(
-      `   - Favorable Elements (Secondary): ${chapterReport.technicalBasis.favorableElements?.secondary.join(', ') || 'None'}`,
-    );
-    console.log(
-      `   - Unfavorable Elements: ${chapterReport.technicalBasis.favorableElements?.unfavorable.join(', ') || 'None'}`,
-    );
-    console.log(
-      `   ℹ️  Note: Library uses chart strength analysis (用神), not simple element production`,
-    );
-
-    const turningPointData = (chapterReport.phaseAnalysis || []).map(
-      (phase, i) => {
-        // Get top 2 categories by net score (more reliable than threshold)
-        const categoryScores = Object.entries(phase.avgScores)
-          .filter(([key]) => key !== 'overall')
-          .map(([key, val]) => ({ key, net: (val as any).net }))
-          .sort((a, b) => b.net - a.net)
-          .slice(0, 2)
-          .map((item) => item.key);
-
-        return {
-          year:
-            chapterReport.startDate.getFullYear() +
-            Math.floor((i / (chapterReport.phaseAnalysis?.length || 1)) * 20),
-          age:
-            ageStart +
-            Math.floor((i / (chapterReport.phaseAnalysis?.length || 1)) * 20),
-          score: phase.avgScores.overall.net,
-          categories: categoryScores,
-        };
-      },
-    );
-
-    console.log(
-      `\n[Chapter ${chapter}] Turning Point Data (Top 2 Categories per Phase):`,
-    );
-    turningPointData.forEach((tp, i) => {
-      console.log(
-        `   ${i + 1}. Year ${tp.year} (Age ${tp.age}): Score ${tp.score}, Categories: ${tp.categories.join(', ')}`,
-      );
-    });
-    console.log('');
-
-    const [
-      titleResult,
-      introResult,
-      vibesResult,
-      turningPointsResult,
-      cheatSheetResult,
-      takeawaysResult,
-    ] = await Promise.all([
-      generateText({
-        model: geminiClient('gemini-2.5-flash'),
-        temperature: 0.2,
-        experimental_telemetry: { isEnabled: true },
-        messages: [
-          { role: 'user', content: generateTitlePrompt(simpleContext) },
-        ],
-        output: Output.object({ schema: titleOutputSchema.strict() }),
-      }),
-      generateText({
-        model: geminiClient('gemini-2.5-flash'),
-        temperature: 0.2,
-        experimental_telemetry: { isEnabled: true },
-        messages: [
-          { role: 'user', content: generateChapterIntroPrompt(simpleContext) },
-        ],
-        output: Output.object({ schema: introductionOutputSchema.strict() }),
-      }),
-      generateText({
-        model: geminiClient('gemini-2.5-flash'),
-        temperature: 0.2,
-        experimental_telemetry: { isEnabled: true },
-        messages: [
-          { role: 'user', content: generateVibeCheckPrompt(simpleContext) },
-        ],
-        output: Output.object({ schema: vibeCheckOutputSchema.strict() }),
-      }),
-      generateText({
-        model: geminiClient('gemini-2.5-flash'),
-        temperature: 0.2,
-        experimental_telemetry: { isEnabled: true },
-        messages: [
-          {
-            role: 'user',
-            content: generateTurningPointsPrompt(
-              simpleContext,
-              turningPointData,
-            ),
-          },
-        ],
-        output: Output.object({ schema: turningPointsOutputSchema.strict() }),
-      }),
-      generateText({
-        model: geminiClient('gemini-2.5-flash'),
-        temperature: 0.2,
-        experimental_telemetry: { isEnabled: true },
-        messages: [
-          { role: 'user', content: generateCheatSheetPrompt(simpleContext) },
-        ],
-        output: Output.object({ schema: cheatSheetOutputSchema.strict() }),
-      }),
-      generateText({
-        model: geminiClient('gemini-2.5-flash'),
-        temperature: 0.2,
-        experimental_telemetry: { isEnabled: true },
-        messages: [
-          { role: 'user', content: generateTakeawaysPrompt(simpleContext) },
-        ],
-        output: Output.object({ schema: takeawaysOutputSchema.strict() }),
-      }),
-    ]);
-
-    console.log(
-      `[Chapter ${chapter}] LLM generation complete in ${Date.now() - aiStart}ms`,
-    );
-
-    const finalReport = {
-      _source: {
-        fortuneReport: chapterReport,
-        llmContext: llmContext,
-      },
-      title: (titleResult as any).output.title,
-      subtitle: (titleResult as any).output.subtitle,
-      introduction: (introResult as any).output.text,
-      vibeCheck: (vibesResult as any).output,
-      turningPoints: (turningPointsResult as any).output,
-      cheatSheet: (cheatSheetResult as any).output,
-      takeaways: (takeawaysResult as any).output.text,
-    };
-
-    const totalTime = Date.now() - startTime;
-    console.log(
-      `[Chapter ${chapter}] TOTAL TIME: ${totalTime}ms (~${Math.round(totalTime / 1000)}s)`,
-    );
-    console.log(`   - Data generation: ${aiStart - startTime}ms`);
-    console.log(`   - LLM generation: ${Date.now() - aiStart}ms`);
-
-    return finalReport;
-    */ // END COMMENTED OUT LLM SECTION
   }
-
-  async getRangeAnalysis(
-    birthDateTime: Date,
-    gender: 'male' | 'female',
-    birthTimezone: string,
-    currentTimezone: string,
-    isTimeKnown: boolean,
-    startDate: Date,
-    endDate: Date,
-    granularity: 'day' | 'month' | 'year',
-  ): Promise<RawBaziData[]> {
-    const baseCalculator = new BaziCalculator(
-      birthDateTime,
-      gender,
-      birthTimezone,
-      isTimeKnown,
-    );
-    const baseAnalysis = baseCalculator.getCompleteAnalysis();
-
-    if (!baseAnalysis) {
-      throw new Error('SajuService: getCompleteAnalysis returned null.');
-    }
-
-    // Normalize the requested calendar dates to "midnight in the target timezone".
-    // This prevents off-by-one day shifts (e.g. 2025-07-01 becoming 2025-06-30)
-    // when the input Date is at 00:00Z and the target timezone is behind UTC.
-    const startYmd = startDate.toISOString().slice(0, 10); // YYYY-MM-DD
-    const endYmd = endDate.toISOString().slice(0, 10); // YYYY-MM-DD
-    const normalizedStart = toDate(startYmd, { timeZone: currentTimezone });
-    const normalizedEnd = toDate(endYmd, { timeZone: currentTimezone });
-
-    const dailyAnalyses = baseCalculator.getAnalysisForDateRange(
-      normalizedStart,
-      normalizedEnd,
-      currentTimezone,
-      { type: 'personalized' },
-    ) as PersonalizedDailyAnalysisOutput[];
-
-    if (!dailyAnalyses) {
-      throw new Error('SajuService: getAnalysisForDateRange returned null.');
-    }
-
-    // Build user context once (natal characteristics)
-    const userContext = BaziDataExtractor.buildUserContext(baseAnalysis);
-
-    // Extract raw data from library (no calculation, just transformation)
-    const dailyData = dailyAnalyses.map((day) =>
-      BaziDataExtractor.extract(userContext, day),
-    );
-
-    // TODO: Aggregation logic for monthly/yearly views will be implemented
-    // in ViewAggregator to identify significant periods
-    // For now, return raw daily data
-    return dailyData;
-  }
-
-  // TODO: Implement aggregation methods using ViewAggregator
-  // These will analyze RawBaziData[] to identify:
-  // - Significant day ranges within months
-  // - Significant months within years
-  // - Significant years within luck eras
 
   /**
    * Generate compatibility analysis between two people
    */
+  /**
+   * Build comprehensive BaZi context string for LLM compatibility analysis
+   */
+  private buildBaziContextForLLM(
+    userContext: UserContext,
+    identity: ReturnType<typeof this.generateIdentity>,
+    personLabel: string, // "Person1" or "Person2"
+  ): string {
+    const { natalStructure, specialStars, natalPatterns } = userContext;
+    const elementDist = this.calculateElementDistribution(userContext);
+
+    // Get Day Master explanation for traditional BaZi context
+    const dayMasterChar = userContext.natalStructure.personal.stem;
+    const dayMasterInfo = DAY_MASTER_EXPLANATIONS[dayMasterChar];
+
+    // Build comprehensive context
+    let context = `\n=== ${personLabel} BaZi Chart Data ===\n`;
+    context += `Day Master: ${identity.element}-${identity.polarity} (${identity.code}) - ${identity.title}\n`;
+    if (dayMasterInfo) {
+      context += `Day Master Nature: ${dayMasterInfo.explanation}\n`;
+      context += `Core Trait: ${identity.coreTrait}\n`;
+      context += `Behavioral Style: ${identity.behavior}\n`;
+    }
+    context += `Year Pillar: ${natalStructure.social.stem}${natalStructure.social.branch} (${natalStructure.social.element})\n`;
+    context += `Month Pillar: ${natalStructure.career.stem}${natalStructure.career.branch} (${natalStructure.career.element})\n`;
+    context += `Day Pillar: ${natalStructure.personal.stem}${natalStructure.personal.branch} (${natalStructure.personal.element})\n`;
+    if (natalStructure.innovation) {
+      context += `Hour Pillar: ${natalStructure.innovation.stem}${natalStructure.innovation.branch} (${natalStructure.innovation.element})\n`;
+    }
+
+    context += `\nElement Distribution:\n`;
+    context += `- Wood: ${elementDist.wood} (${elementDist.percentages.wood}%)\n`;
+    context += `- Fire: ${elementDist.fire} (${elementDist.percentages.fire}%)\n`;
+    context += `- Earth: ${elementDist.earth} (${elementDist.percentages.earth}%)\n`;
+    context += `- Metal: ${elementDist.metal} (${elementDist.percentages.metal}%)\n`;
+    context += `- Water: ${elementDist.water} (${elementDist.percentages.water}%)\n`;
+    context += `Dominant: ${elementDist.dominant.join(', ')}\n`;
+    if (elementDist.missing.length > 0) {
+      context += `Missing: ${elementDist.missing.join(', ')}\n`;
+    }
+
+    // Add Ten Gods if available (from natal structure)
+    // Note: Ten Gods are calculated from pillar interactions, not stored directly in UserContext
+    // We can add this later if needed for compatibility analysis
+
+    // Add special stars
+    if (specialStars) {
+      context += `\nSpecial Stars:\n`;
+      if (specialStars.intelligence) {
+        context += `- Intelligence Star (文昌): ${specialStars.intelligence}\n`;
+      }
+      if (specialStars.peachBlossom) {
+        context += `- Peach Blossom (桃花): ${specialStars.peachBlossom}\n`;
+      }
+      if (specialStars.skyHorse) {
+        context += `- Sky Horse (驿马): ${specialStars.skyHorse}\n`;
+      }
+      if (specialStars.nobleman && specialStars.nobleman.length > 0) {
+        context += `- Nobleman (天乙贵人): ${specialStars.nobleman.join(', ')}\n`;
+      }
+    }
+
+    // Add patterns
+    if (natalPatterns && natalPatterns.length > 0) {
+      context += `\nSpecial Patterns:\n`;
+      natalPatterns.forEach((pattern) => {
+        context += `- ${pattern.name}: ${pattern.description}\n`;
+      });
+    }
+
+    return context;
+  }
+
+  /**
+   * Generate compatibility analysis for a specific category using LLM
+   */
+  private async generateCategoryCompatibility(
+    category: 'romance' | 'work' | 'lifestyle' | 'communication',
+    person1Context: UserContext,
+    person1Identity: ReturnType<typeof this.generateIdentity>,
+    person2Context: UserContext,
+    person2Identity: ReturnType<typeof this.generateIdentity>,
+    person1Gender: 'male' | 'female',
+    person2Gender: 'male' | 'female',
+    person1BirthDate: Date,
+    person2BirthDate: Date,
+  ): Promise<{
+    category: string;
+    emoji: string;
+    title: string;
+    subCategories: Array<{
+      title: string;
+      person1Analysis: string;
+      person2Analysis: string;
+      result: {
+        score: 'Highly Compatible' | 'Compatible' | 'Neutral' | 'Challenging' | 'Highly Challenging';
+        match: string;
+        analysis: string;
+        actionableTip?: string;
+      };
+    }>;
+  }> {
+    const categoryConfig = {
+      romance: {
+        emoji: '💕',
+        title: 'Romance',
+        subCategories: [
+          'Emotional Expression',
+          'Intimacy & Connection',
+          'Conflict Resolution',
+          'Long-term Vision',
+        ],
+      },
+      work: {
+        emoji: '💼',
+        title: 'Work',
+        subCategories: [
+          'Communication Style',
+          'Decision Making',
+          'Work Pace & Energy',
+          'Collaboration Approach',
+        ],
+      },
+      lifestyle: {
+        emoji: '🏠',
+        title: 'Lifestyle',
+        subCategories: [
+          'Daily Routines',
+          'Social Preferences',
+          'Financial Values',
+          'Life Priorities',
+        ],
+      },
+      communication: {
+        emoji: '💬',
+        title: 'Communication',
+        subCategories: [
+          'Communication Style',
+          'Conflict Approach',
+          'Support & Needs',
+          'Shared Values',
+        ],
+      },
+    };
+
+    const config = categoryConfig[category];
+    const person1Pronoun = person1Gender === 'male' ? 'he' : person1Gender === 'female' ? 'she' : 'they';
+    const person1Possessive = person1Gender === 'male' ? 'his' : person1Gender === 'female' ? 'her' : 'their';
+
+    // Calculate ages for life stage context
+    const now = new Date();
+    const person1Age = Math.floor((now.getTime() - person1BirthDate.getTime()) / (1000 * 60 * 60 * 24 * 365.25));
+    const person2Age = Math.floor((now.getTime() - person2BirthDate.getTime()) / (1000 * 60 * 60 * 24 * 365.25));
+    
+    // Determine life stage
+    const getLifeStage = (age: number): string => {
+      if (age < 25) return 'young adult';
+      if (age < 35) return 'early career';
+      if (age < 50) return 'mid-career';
+      if (age < 65) return 'established';
+      return 'mature';
+    };
+    const person1LifeStage = getLifeStage(person1Age);
+    const person2LifeStage = getLifeStage(person2Age);
+
+    // Calculate element interaction for context
+    const elementInteraction = this.calculateElementInteraction(
+      person1Identity.element as ElementType,
+      person2Identity.element as ElementType,
+    );
+
+    // Get "Who You Are" content for both persons - this ensures consistency with personal reports
+    const person1WhoYouAre = this.getWhoYouAreContent(person1Identity.code, person1Context);
+    const person2WhoYouAre = this.getWhoYouAreContent(person2Identity.code, person2Context);
+
+    const schema = z.object({
+      subCategories: z.array(
+        z.object({
+          title: z.string(),
+          person1Analysis: z.string().describe(`How Person1 approaches this sub-category. Use "${person1Pronoun}" or "${person1Possessive}" pronouns.`),
+          person2Analysis: z.string().describe(`How Person2 approaches this sub-category. Use "you" or "your" pronouns (Person2 is the requestor).`),
+          result: z.object({
+            score: z.enum(['Highly Compatible', 'Compatible', 'Neutral', 'Challenging', 'Highly Challenging']),
+            match: z.string().describe('Brief match description (e.g., "Strong Match", "Requires Attention")'),
+            analysis: z.string().describe('2-3 sentences explaining the compatibility level and why'),
+            actionableTip: z.string().optional().describe('Optional: specific tip for this sub-category'),
+          }),
+        }),
+      ),
+    });
+
+    const prompt = `You are a relationship compatibility expert. Analyze how two people connect in the ${config.title} category. Write in simple, direct language that anyone can understand - NO technical terms or jargon.
+
+**Person1 (${person1Identity.title}):**
+Age: ${person1Age} (${person1LifeStage} stage)
+Gender: ${person1Gender}
+${person1WhoYouAre.paragraphs.join('\n\n')}
+
+**Person2 (${person2Identity.title} - this is the requestor reading the report):**
+Age: ${person2Age} (${person2LifeStage} stage)
+Gender: ${person2Gender}
+${person2WhoYouAre.paragraphs.join('\n\n')}
+
+**IMPORTANT - Consider Age & Life Stage (but DO NOT mention ages in output):**
+- The personality traits described above are core tendencies, but how they manifest changes with age and life experience
+- A 20-year-old and a 50-year-old with the same traits will express them differently
+- Consider their life stage when describing behaviors (e.g., a young adult might be more idealistic, while someone established might be more pragmatic)
+- **CRITICAL: DO NOT mention ages, life stages, or years in your output** - use age context only to inform how traits manifest, never state it directly
+- **CRITICAL: Do NOT copy phrases verbatim from the descriptions above** - extract the MEANING and CORE TRAITS, then express them in YOUR OWN WORDS
+- If you find yourself using the exact same phrases from the descriptions, stop and rephrase completely
+- Use the descriptions as a reference for personality traits, not as text to quote or copy
+
+**CRITICAL: Scoring Consistency Rules**
+Use these EXACT criteria for each score level. Be consistent - the same chart data should ALWAYS produce the same score:
+
+- **Highly Compatible (5)**: Natural synergy - you work well together with minimal effort. Your personalities complement each other perfectly.
+
+- **Compatible (4)**: Good fit overall - you connect well but may need small adjustments in some areas. Generally positive dynamic.
+
+- **Neutral (3)**: Mixed bag - some things work, some don't. Compatibility depends on context and how much effort you both put in.
+
+- **Challenging (2)**: Significant differences - you'll need to work hard and compromise to make this work. Not impossible, but requires effort.
+
+- **Highly Challenging (1)**: Fundamental differences - your personalities clash in ways that require constant attention and effort to manage.
+
+**Instructions:**
+1. Analyze each of the 4 sub-categories: ${config.subCategories.join(', ')}
+
+2. For each sub-category, maintain this structure (required for UI):
+   - **Person1Analysis**: Describe Person1's approach using "${person1Pronoun}" or "${person1Possessive}" pronouns
+   - **Person2Analysis**: Describe Person2's approach using "you" or "your" pronouns (Person2 is the requestor)
+   - **Result**: Score, match description, analysis (2-3 sentences), and optional actionable tip
+
+3. **CRITICAL - Use the "Who You Are" descriptions above to create SPECIFIC, CONCRETE analyses:**
+   - Reference specific behaviors and examples from the descriptions (e.g., "stays late perfecting presentations", "doesn't do casual", "struggles to delegate")
+   - Use concrete scenarios, not abstract traits (e.g., "She might rewrite a text three times" not "She values precision")
+   - Show HOW their traits manifest differently, not just THAT they're different
+   - Each sub-category should feel unique - avoid repeating the same phrases or patterns
+
+4. **Vary your language** - Don't use "meticulous", "uncompromising quality", "intense focus" in every analysis. Use different words:
+   - Instead of "meticulous": "detail-oriented", "thorough", "careful", "precise", "exacting"
+   - Instead of "uncompromising quality": "high standards", "won't settle", "demands excellence", "refuses mediocrity"
+   - Instead of "intense focus": "deep concentration", "laser attention", "all-in commitment", "zeroing in"
+
+5. **Be concise and punchy** - Aim for 2-3 sentences per analysis, not paragraphs. Cut filler words.
+
+6. Write in simple, direct language as if explaining to a friend - NO technical terms or jargon.
+
+Return analysis for all 4 sub-categories.`;
+
+    const result = await generateText({
+      model: geminiClient('gemini-2.5-flash'),
+      temperature: 0.6, // Balanced temperature for natural variation while maintaining consistency
+      prompt,
+      output: Output.object({ schema }),
+    });
+
+    return {
+      category: category as 'romance' | 'work' | 'lifestyle' | 'communication',
+      emoji: config.emoji,
+      title: config.title,
+      subCategories: result.output.subCategories,
+    };
+  }
+
+  /**
+   * Generate ALL compatibility content in a single comprehensive prompt
+   * This ensures consistency across categories and prevents contradictions
+   */
+  private async generateAllCompatibilityContent(
+    person1Context: UserContext,
+    person1Identity: ReturnType<typeof this.generateIdentity>,
+    person2Context: UserContext,
+    person2Identity: ReturnType<typeof this.generateIdentity>,
+    person1Gender: 'male' | 'female',
+    person2Gender: 'male' | 'female',
+    person1BirthDate: Date,
+    person2BirthDate: Date,
+    elementInteraction: ReturnType<typeof this.calculateElementInteraction>,
+  ): Promise<{
+    categories: Array<{
+      category: string;
+      emoji: string;
+      title: string;
+      subCategories: Array<{
+        title: string;
+        person1Analysis: string;
+        person2Analysis: string;
+        result: {
+          score: 'Highly Compatible' | 'Compatible' | 'Neutral' | 'Challenging' | 'Highly Challenging';
+          match: string;
+          analysis: string;
+          actionableTip?: string;
+        };
+      }>;
+    }>;
+    overview: string;
+    conclusion: string;
+  }> {
+    const person1Pronoun = person1Gender === 'male' ? 'he' : person1Gender === 'female' ? 'she' : 'they';
+    const person1Possessive = person1Gender === 'male' ? 'his' : person1Gender === 'female' ? 'her' : 'their';
+
+    // Calculate ages for life stage context
+    const now = new Date();
+    const person1Age = Math.floor((now.getTime() - person1BirthDate.getTime()) / (1000 * 60 * 60 * 24 * 365.25));
+    const person2Age = Math.floor((now.getTime() - person2BirthDate.getTime()) / (1000 * 60 * 60 * 24 * 365.25));
+    
+    // Determine life stage
+    const getLifeStage = (age: number): string => {
+      if (age < 25) return 'young adult';
+      if (age < 35) return 'early career';
+      if (age < 50) return 'mid-career';
+      if (age < 65) return 'established';
+      return 'mature';
+    };
+    const person1LifeStage = getLifeStage(person1Age);
+    const person2LifeStage = getLifeStage(person2Age);
+
+    // Get "Who You Are" content for both persons
+    const person1WhoYouAre = this.getWhoYouAreContent(person1Identity.code, person1Context);
+    const person2WhoYouAre = this.getWhoYouAreContent(person2Identity.code, person2Context);
+
+    const schema = z.object({
+      categories: z.array(
+        z.object({
+          category: z.enum(['romance', 'work', 'lifestyle', 'communication']),
+          emoji: z.string(),
+          title: z.string(),
+          subCategories: z.array(
+            z.object({
+              title: z.string(),
+              person1Analysis: z.string(),
+              person2Analysis: z.string(),
+              result: z.object({
+                score: z.enum(['Highly Compatible', 'Compatible', 'Neutral', 'Challenging', 'Highly Challenging']),
+                match: z.string(),
+                analysis: z.string(),
+                actionableTip: z.string().optional(),
+              }),
+            }),
+          ),
+        }),
+      ),
+      overview: z.string().describe('5-7 sentence overview synthesizing how they connect, written from Person2 perspective (use "you" for Person2, "they/he/she" for Person1)'),
+      conclusion: z.string().describe('2-3 sentence conclusion summarizing the overall compatibility dynamic'),
+    });
+
+    const prompt = `You are a relationship compatibility expert. Analyze how two people connect across ALL areas of their relationship. Write in simple, direct language that anyone can understand - NO technical terms or jargon.
+
+**Person1 (${person1Identity.title}):**
+Age: ${person1Age} (${person1LifeStage} stage)
+Gender: ${person1Gender}
+${person1WhoYouAre.paragraphs.join('\n\n')}
+
+**Person2 (${person2Identity.title} - this is the requestor reading the report):**
+Age: ${person2Age} (${person2LifeStage} stage)
+Gender: ${person2Gender}
+${person2WhoYouAre.paragraphs.join('\n\n')}
+
+**IMPORTANT - Consider Age & Life Stage (but DO NOT mention ages in output):**
+- The personality traits described above are core tendencies, but how they manifest changes with age and life experience
+- A 20-year-old and a 50-year-old with the same traits will express them differently
+- Consider their life stage when describing behaviors
+- **CRITICAL: DO NOT mention ages, life stages, or years in your output** - use age context only to inform how traits manifest
+- **CRITICAL: Do NOT copy phrases verbatim from the descriptions above** - extract the MEANING and CORE TRAITS, then express them in YOUR OWN WORDS
+- If you find yourself using the exact same phrases from the descriptions, stop and rephrase completely
+
+**Element Interaction Reference (for scoring guidance only - DO NOT mention in output):**
+- ${person1Identity.element} vs ${person2Identity.element}: ${elementInteraction.description}
+
+**CRITICAL: Scoring Consistency Rules**
+Use these EXACT criteria for each score level. Be consistent - the same chart data should ALWAYS produce the same score:
+
+- **Highly Compatible (5)**: Natural synergy - you work well together with minimal effort. Your personalities complement each other perfectly.
+- **Compatible (4)**: Good fit overall - you connect well but may need small adjustments in some areas. Generally positive dynamic.
+- **Neutral (3)**: Mixed bag - some things work, some don't. Compatibility depends on context and how much effort you both put in.
+- **Challenging (2)**: Significant differences - you'll need to work hard and compromise to make this work. Not impossible, but requires effort.
+- **Highly Challenging (1)**: Fundamental differences - your personalities clash in ways that require constant attention and effort to manage.
+
+**CRITICAL: Cross-Category Consistency**
+- If the same behavior/trait appears in multiple categories (e.g., "conflict resolution" in Romance and "conflict approach" in Communication), ensure the scores are logically consistent
+- The same underlying personality trait should be evaluated consistently across categories
+- Don't score the same behavior as "Challenging" in one category and "Compatible" in another - be consistent
+
+**Instructions:**
+1. Analyze ALL 4 categories with their sub-categories:
+   - **Romance**: Emotional Expression, Intimacy & Connection, Conflict Resolution, Long-term Vision
+   - **Work**: Communication Style, Decision Making, Work Pace & Energy, Collaboration Approach
+   - **Lifestyle**: Daily Routines, Social Preferences, Financial Values, Life Priorities
+   - **Communication**: Communication Style, Conflict Approach, Support & Needs, Shared Values
+
+2. For each sub-category:
+   - **Person1Analysis**: Describe Person1's approach using "${person1Pronoun}" or "${person1Possessive}" pronouns
+   - **Person2Analysis**: Describe Person2's approach using "you" or "your" pronouns (Person2 is the requestor)
+   - **Result**: Score, match description, analysis (2-3 sentences), and optional actionable tip
+
+3. **CRITICAL - Use the "Who You Are" descriptions above to create SPECIFIC, CONCRETE analyses:**
+   - Reference specific behaviors and examples from the descriptions
+   - Use concrete scenarios, not abstract traits
+   - Show HOW their traits manifest differently, not just THAT they're different
+   - Each sub-category should feel unique - avoid repeating the same phrases or patterns
+
+4. **Vary your language** - Don't use "meticulous", "uncompromising quality", "intense focus" in every analysis. Use different words throughout.
+
+5. **Be concise and punchy** - Aim for 2-3 sentences per analysis, not paragraphs.
+
+6. **Generate overview** (5-7 sentences): Synthesize how they connect overall, written from Person2's perspective. Highlight key strengths and areas that need attention.
+
+7. **Generate conclusion** (2-3 sentences): Summarize the overall compatibility dynamic in a memorable way.
+
+8. Write in simple, direct language as if explaining to a friend - NO technical terms or jargon.
+
+Return analysis for all 4 categories, overview, and conclusion.`;
+
+    const result = await generateText({
+      model: geminiClient('gemini-2.5-flash'),
+      temperature: 0.6,
+      prompt,
+      output: Output.object({ schema }),
+    });
+
+    return {
+      categories: result.output.categories,
+      overview: result.output.overview,
+      conclusion: result.output.conclusion,
+    };
+  }
+
+  /**
+   * Generate overall overview based on category results
+   */
+  private async generateCompatibilityOverviewFromCategories(
+    person1Identity: ReturnType<typeof this.generateIdentity>,
+    person2Identity: ReturnType<typeof this.generateIdentity>,
+    categories: Array<{
+      category: string;
+      title: string;
+      subCategories: Array<{
+        title: string;
+        result: { score: string; analysis: string };
+      }>;
+    }>,
+  ): Promise<string> {
+    // Build summary of category results
+    let categorySummary = '';
+    categories.forEach((cat) => {
+      const scores = cat.subCategories.map((sc) => sc.result.score);
+      const avgScore = scores.reduce((acc, score) => {
+        const scoreValue = {
+          'Highly Compatible': 5,
+          'Compatible': 4,
+          'Neutral': 3,
+          'Challenging': 2,
+          'Highly Challenging': 1,
+        }[score] || 3;
+        return acc + scoreValue;
+      }, 0) / scores.length;
+
+      categorySummary += `\n${cat.title}: Average score ${avgScore.toFixed(1)}/5\n`;
+      cat.subCategories.forEach((sc) => {
+        categorySummary += `  - ${sc.title}: ${sc.result.score} - ${sc.result.analysis}\n`;
+      });
+    });
+
+    const prompt = `You are a relationship compatibility expert. Generate a 5-7 sentence overview synthesizing how ${person1Identity.title} and ${person2Identity.title} connect. Write in simple, direct language - NO technical terms or jargon.
+
+**Category Results:**
+${categorySummary}
+
+**LANGUAGE REQUIREMENTS:**
+- Write in plain, everyday language
+- NO technical terms: Don't mention "Day Master", "Ten Gods", "elements", "BaZi", "pillars", "cycles", or any astrology jargon
+- Be direct and simple: Focus on behaviors and personality traits
+- Write as if explaining to a friend
+- **CRITICAL: Use VARIED language** - Don't repeat the same phrases. Express concepts using different words throughout the overview
+
+**Instructions:**
+1. Write from Person2's perspective (use "you" for Person2, "they/he/she" for Person1)
+2. Synthesize the overall dynamic based on the category results
+3. Highlight key strengths and areas that need attention - in simple terms
+4. Provide a balanced, psychology-focused overview
+5. Avoid contradictions with the category analyses
+6. Be specific about behaviors and personality traits, NOT technical concepts
+7. Use simple, relatable language throughout
+
+Generate a cohesive overview paragraph (5-7 sentences) in plain language.`;
+
+    const { text } = await generateText({
+      model: geminiClient('gemini-2.5-flash'),
+      prompt,
+    });
+
+    return text;
+  }
+
+  /**
+   * Swap person1 and person2 in a compatibility report
+   */
+  swapCompatibilityReportPersons(
+    report: CompatibilityReport,
+  ): CompatibilityReport {
+    // Swap person1 and person2
+    const swappedPerson1 = report.person2;
+    const swappedPerson2 = report.person1;
+
+    // Swap in pairing title
+    const swappedPairingTitle = {
+      name: report.pairingTitle.name,
+      subtitle: report.pairingTitle.subtitle
+        .replace(
+          new RegExp(
+            `${report.person1.identity.element}|${report.person2.identity.element}`,
+            'g',
+          ),
+          (match) => {
+            return match === report.person1.identity.element
+              ? report.person2.identity.element
+              : report.person1.identity.element;
+          },
+        ),
+    };
+
+    // Swap in chart display
+    const swappedChartDisplay = {
+      person1: report.chartDisplay.person2,
+      person2: report.chartDisplay.person1,
+      interaction: {
+        ...report.chartDisplay.interaction,
+        visual: report.chartDisplay.interaction.visual
+          .split('→')
+          .reverse()
+          .join('→'),
+      },
+      fullCharts: {
+        person1: report.chartDisplay.fullCharts.person2,
+        person2: report.chartDisplay.fullCharts.person1,
+      },
+    };
+
+    // Swap in technical basis
+    const swappedTechnicalBasis = report.technicalBasis
+      ? {
+          ...report.technicalBasis,
+          elementInteraction: {
+            ...report.technicalBasis.elementInteraction,
+            person1Element: report.technicalBasis.elementInteraction.person2Element,
+            person2Element: report.technicalBasis.elementInteraction.person1Element,
+          },
+        }
+      : undefined;
+
+    // Update categories: swap person1Analysis and person2Analysis
+    const swappedCategories = report.categories.map((cat) => ({
+      ...cat,
+      subCategories: cat.subCategories.map((sc) => ({
+        ...sc,
+        person1Analysis: sc.person2Analysis,
+        person2Analysis: sc.person1Analysis,
+      })),
+    }));
+
+    return {
+      ...report,
+      person1: swappedPerson1,
+      person2: swappedPerson2,
+      pairingTitle: swappedPairingTitle,
+      chartDisplay: swappedChartDisplay,
+      technicalBasis: swappedTechnicalBasis,
+      categories: swappedCategories,
+      // Note: overview, specialConnections, etc. may need pronoun swapping
+      // For now, we'll regenerate overview if needed
+    };
+  }
+
   async getCompatibilityAnalysis(
     person1Data: {
       birthDateTime: Date;
@@ -2511,7 +2951,9 @@ export class SajuService {
       birthTimezone: string;
       isTimeKnown: boolean;
     },
+    relationshipType?: 'romantic' | 'family' | 'friend' | 'colleague' | 'other',
   ): Promise<CompatibilityReport> {
+    this.logger.log('=== getCompatibilityAnalysis called with NEW structure ===');
     // 1. Build UserContext for both people (reuse existing logic)
     const calc1 = new BaziCalculator(
       person1Data.birthDateTime,
@@ -2523,6 +2965,7 @@ export class SajuService {
     if (!analysis1) throw new Error('Failed to analyze person 1');
     const userContext1 = BaziDataExtractor.buildUserContext(analysis1);
     const identity1 = this.generateIdentity(userContext1);
+    const elementDist1 = this.calculateElementDistribution(userContext1);
 
     const calc2 = new BaziCalculator(
       person2Data.birthDateTime,
@@ -2534,6 +2977,7 @@ export class SajuService {
     if (!analysis2) throw new Error('Failed to analyze person 2');
     const userContext2 = BaziDataExtractor.buildUserContext(analysis2);
     const identity2 = this.generateIdentity(userContext2);
+    const elementDist2 = this.calculateElementDistribution(userContext2);
 
     // 2. Calculate element interaction
     const elementInteraction = this.calculateElementInteraction(
@@ -2541,14 +2985,7 @@ export class SajuService {
       identity2.element as ElementType,
     );
 
-    // 3. Calculate compatibility score
-    const score = this.calculateCompatibilityScore(
-      userContext1,
-      userContext2,
-      elementInteraction.interactionType,
-    );
-
-    // 4. Calculate rarity
+    // 3. Calculate rarity
     const rarity = this.calculatePairingRarity(
       identity1.code,
       identity2.code,
@@ -2556,76 +2993,56 @@ export class SajuService {
       userContext2,
     );
 
-    // 5. Generate psychology-first content
-    const sharedTraits = this.generateSharedTraits(
+    // 4. Generate all categories + overview + conclusion in a single comprehensive prompt
+    // This ensures consistency and prevents contradictions across categories
+    this.logger.log('Starting comprehensive compatibility content generation (single prompt)...');
+    const compatibilityContent = await this.generateAllCompatibilityContent(
       userContext1,
-      userContext2,
       identity1,
-      identity2,
-    );
-
-    const specialConnections = this.generateSpecialConnections(
-      userContext1,
       userContext2,
+      identity2,
+      person1Data.gender,
+      person2Data.gender,
+      person1Data.birthDateTime,
+      person2Data.birthDateTime,
       elementInteraction,
-    );
+    ).catch((err) => {
+      this.logger.error('Error generating comprehensive compatibility content:', err);
+      throw err;
+    });
+    this.logger.log('Completed comprehensive compatibility content generation');
 
-    const dynamics = this.generateDynamics(
-      identity1,
-      identity2,
-      userContext1,
-      userContext2,
-      elementInteraction,
-    );
+    const categories = compatibilityContent.categories;
+    const overview = compatibilityContent.overview;
+    const conclusion = compatibilityContent.conclusion;
 
-    const sharedBehaviors = this.generateSharedBehaviors(
-      userContext1,
-      userContext2,
-      identity1,
-      identity2,
-    );
-
-    const growthAreas = this.generateGrowthAreas(
-      userContext1,
-      userContext2,
-      identity1,
-      identity2,
-      elementInteraction,
-    );
-
-    // 6. Generate LLM overview (psychology-focused)
-    const overview = await this.generateCompatibilityOverview(
-      identity1,
-      identity2,
-      sharedTraits,
-      dynamics,
-      score.rating,
-    );
-
-    // 7. Generate score breakdown (top-level, visible)
-    const scoreBreakdown = this.generateScoreBreakdown(
-      userContext1,
-      userContext2,
-      score.overall,
-    );
-
-    // 8. Generate pairing title (unique name for this compatibility)
+    // 5. Generate pairing title (unique name for this compatibility)
     const pairingTitle = this.generatePairingTitle(
       identity1,
       identity2,
       elementInteraction,
     );
 
-    // 9. Generate introduction text (explains the pairing's core dynamic)
-    const introduction = this.generateCompatibilityIntroduction(
+    // 6. Generate pairing explanation (why this pairing is called this name - similar to personal report chart explanation)
+    const pairingExplanation = this.generatePairingExplanation(
+      pairingTitle,
+      identity1,
+      identity2,
+      elementDist1,
+      elementDist2,
+      elementInteraction,
+    );
+
+    // 7. Generate introduction text (explains the pairing's core dynamic)
+    const introduction = await this.generateCompatibilityIntroduction(
       identity1,
       identity2,
       elementInteraction,
-      scoreBreakdown.summary,
-      score.overall,
+      null, // No score breakdown summary anymore
+      0, // No overall score
     );
 
-    // 10. Generate chart display (stacked cards with Day Masters + full charts)
+    // 8. Generate chart display (stacked cards with Day Masters + full charts)
     const chartDisplay = this.generateChartDisplay(
       userContext1,
       userContext2,
@@ -2634,20 +3051,26 @@ export class SajuService {
       elementInteraction,
     );
 
+    // 9. Generate special connections
+    const specialConnections = this.generateSpecialConnections(
+      userContext1,
+      userContext2,
+      elementInteraction,
+    );
+
     // 10. Build technical basis (hidden by default)
     const technicalBasis = this.buildTechnicalBasis(
       elementInteraction,
-      score,
+      null, // No baseScore anymore
       userContext1,
       userContext2,
     );
 
     return {
-      pairingTitle, // NEW: Unique name for this pairing
-      introduction, // NEW: Explains the pairing's core dynamic
+      pairingTitle,
+      pairingExplanation,
+      introduction,
       person1: {
-        // NOTE: We don't return birthDateTime here - it's not needed in the output
-        // The corrected birthDateTime was only used for calculation
         gender: person1Data.gender,
         identity: {
           code: identity1.code,
@@ -2655,10 +3078,11 @@ export class SajuService {
           element: identity1.element,
           polarity: identity1.polarity,
         },
+        elementDistribution: this.formatElementDistributionForCompatibility(
+          elementDist1,
+        ),
       },
       person2: {
-        // NOTE: We don't return birthDateTime here - it's not needed in the output
-        // The corrected birthDateTime was only used for calculation
         gender: person2Data.gender,
         identity: {
           code: identity2.code,
@@ -2666,21 +3090,337 @@ export class SajuService {
           element: identity2.element,
           polarity: identity2.polarity,
         },
+        elementDistribution: this.formatElementDistributionForCompatibility(
+          elementDist2,
+        ),
       },
-      score,
       rarity,
+      categories,
       overview,
-      scoreBreakdown, // Casual categories: Romance, Work, Lifestyle, Communication
-      chartDisplay, // NEW: Stacked cards showing Day Masters + full charts
-      sharedTraits,
+      conclusion,
+      chartDisplay,
       specialConnections,
-      dynamics,
-      sharedBehaviors,
-      growthAreas,
       technicalBasis,
       generatedAt: new Date(),
       reportType: 'compatibility-teaser',
+    } as CompatibilityReport;
+  }
+
+  /**
+   * Calculate daily compatibility score by adjusting base score based on today's energy
+   * Gets today's daily analysis for both people and adjusts compatibility accordingly
+   */
+  async calculateDailyCompatibility(
+    person1Data: {
+      birthDateTime: Date;
+      gender: 'male' | 'female';
+      birthTimezone: string;
+      isTimeKnown: boolean;
+    },
+    person2Data: {
+      birthDateTime: Date;
+      gender: 'male' | 'female';
+      birthTimezone: string;
+      isTimeKnown: boolean;
+    },
+    baseScore: number,
+    relationshipType: 'romantic' | 'family' | 'friend' | 'colleague' | 'other',
+    currentTimezone: string = 'UTC',
+  ): Promise<{
+    letterGrade: string;
+    insight: string;
+  }> {
+    try {
+      const today = new Date();
+      const todayString = today.toISOString().split('T')[0]; // YYYY-MM-DD
+
+      // Get today's daily analysis for both people
+      const calc1 = new BaziCalculator(
+        person1Data.birthDateTime,
+        person1Data.gender,
+        person1Data.birthTimezone,
+        person1Data.isTimeKnown,
+      );
+      const calc2 = new BaziCalculator(
+        person2Data.birthDateTime,
+        person2Data.gender,
+        person2Data.birthTimezone,
+        person2Data.isTimeKnown,
+      );
+
+      const todayDate = toDate(todayString, { timeZone: currentTimezone });
+      const dailyAnalyses1 = calc1.getAnalysisForDateRange(
+        todayDate,
+        todayDate,
+        currentTimezone,
+        { type: 'personalized' },
+      ) as PersonalizedDailyAnalysisOutput[];
+      const dailyAnalyses2 = calc2.getAnalysisForDateRange(
+        todayDate,
+        todayDate,
+        currentTimezone,
+        { type: 'personalized' },
+      ) as PersonalizedDailyAnalysisOutput[];
+
+      if (
+        !dailyAnalyses1 ||
+        dailyAnalyses1.length === 0 ||
+        !dailyAnalyses2 ||
+        dailyAnalyses2.length === 0
+      ) {
+        // If daily analysis fails, return neutral
+        return {
+          letterGrade: 'C',
+          insight: this.getDailyInsight('C', relationshipType),
+        };
+      }
+
+      const daily1 = dailyAnalyses1[0];
+      const daily2 = dailyAnalyses2[0];
+
+      // Get today's day element for both
+      const todayElement1 = daily1.dayPillar?.stemElement;
+      const todayElement2 = daily2.dayPillar?.stemElement;
+
+      // Get base analysis to check favorable elements
+      const analysis1 = calc1.getCompleteAnalysis();
+      const analysis2 = calc2.getCompleteAnalysis();
+      if (!analysis1 || !analysis2) {
+        return {
+          letterGrade: 'C',
+          insight: this.getDailyInsight('C', relationshipType),
+        };
+      }
+
+      const userContext1 = BaziDataExtractor.buildUserContext(analysis1);
+      const userContext2 = BaziDataExtractor.buildUserContext(analysis2);
+
+      // Get their base element compatibility
+      const identity1 = this.generateIdentity(userContext1);
+      const identity2 = this.generateIdentity(userContext2);
+      const baseElementInteraction = this.calculateElementInteraction(
+        identity1.element as ElementType,
+        identity2.element as ElementType,
+      );
+
+      // Check individual favorability
+      const favorable1 = userContext1.favorableElements?.primary.includes(
+        todayElement1,
+      );
+      const favorable2 = userContext2.favorableElements?.primary.includes(
+        todayElement2,
+      );
+      const unfavorable1 = userContext1.favorableElements?.unfavorable.includes(
+        todayElement1,
+      );
+      const unfavorable2 = userContext2.favorableElements?.unfavorable.includes(
+        todayElement2,
+      );
+
+      // Check how today's elements interact with each other
+      const todayElementInteraction = this.calculateElementInteraction(
+        todayElement1,
+        todayElement2,
+      );
+
+      // Calculate daily adjustment based on multiple factors
+      let dailyAdjustment = 0;
+      let insight = 'Base compatibility';
+
+      // Factor 1: Individual favorability (0-6 points)
+      if (favorable1 && favorable2) {
+        dailyAdjustment += 6;
+      } else if (favorable1 || favorable2) {
+        dailyAdjustment += 3;
+      } else if (unfavorable1 && unfavorable2) {
+        dailyAdjustment -= 6;
+      } else if (unfavorable1 || unfavorable2) {
+        dailyAdjustment -= 3;
+      }
+
+      // Factor 2: How today's elements interact with each other (0-4 points)
+      // If today's elements have a generative/harmonious interaction, it enhances compatibility
+      if (todayElementInteraction.interactionType === 'Generative') {
+        dailyAdjustment += 4;
+      } else if (todayElementInteraction.interactionType === 'Harmonious') {
+        dailyAdjustment += 2;
+      } else if (todayElementInteraction.interactionType === 'Conflicting') {
+        dailyAdjustment -= 4;
+      } else if (todayElementInteraction.interactionType === 'Controlling') {
+        dailyAdjustment -= 2;
+      }
+
+      // Factor 3: Alignment with base compatibility (0-3 points)
+      // If today's interaction type matches their base interaction, it's reinforcing
+      if (
+        todayElementInteraction.interactionType ===
+        baseElementInteraction.interactionType
+      ) {
+        dailyAdjustment += 3;
+      } else if (
+        (baseElementInteraction.interactionType === 'Generative' &&
+          todayElementInteraction.interactionType === 'Harmonious') ||
+        (baseElementInteraction.interactionType === 'Harmonious' &&
+          todayElementInteraction.interactionType === 'Generative')
+      ) {
+        // Complementary positive interactions
+        dailyAdjustment += 2;
+      } else if (
+        (baseElementInteraction.interactionType === 'Conflicting' &&
+          todayElementInteraction.interactionType === 'Controlling') ||
+        (baseElementInteraction.interactionType === 'Controlling' &&
+          todayElementInteraction.interactionType === 'Conflicting')
+      ) {
+        // Both challenging interactions
+        dailyAdjustment -= 2;
+      }
+
+      // Letter grade based on daily fluctuation (adjustment), not final score
+      // This shows how good/bad TODAY is, regardless of base compatibility
+      const letterGrade = this.adjustmentToLetterGrade(dailyAdjustment);
+
+      // Generate relationship-specific insight based on letter grade
+      insight = this.getDailyInsight(letterGrade, relationshipType);
+
+      return {
+        letterGrade,
+        insight,
+      };
+    } catch (error) {
+      // If any error, return neutral
+      return {
+        letterGrade: 'C',
+        insight: this.getDailyInsight('C', relationshipType),
+      };
+    }
+  }
+
+  /**
+   * Get relationship-specific daily insight based on letter grade
+   */
+  private getDailyInsight(
+    letterGrade: string,
+    relationshipType: 'romantic' | 'family' | 'friend' | 'colleague' | 'other',
+  ): string {
+    const insights: Record<
+      string,
+      Record<'romantic' | 'family' | 'friend' | 'colleague' | 'other', string>
+    > = {
+      'A+': {
+        romantic:
+          'Exceptional day for your relationship. Deep conversations flow naturally, and emotional connection feels effortless. Perfect day for meaningful moments together.',
+        family:
+          'Exceptional family harmony today. Communication is clear and supportive, making it ideal for resolving any lingering issues or celebrating together.',
+        friend:
+          'Your friendship shines today. You\'ll understand each other effortlessly and enjoy shared activities. Great day for making plans or having fun together.',
+        colleague:
+          'Exceptional professional synergy today. Collaboration feels natural, ideas flow freely, and you\'ll work together seamlessly. Perfect for important meetings or joint projects.',
+        other:
+          'Exceptional connection between you today. Interactions feel effortless and mutually beneficial, making it an ideal day for any shared activities.',
+      },
+      A: {
+        romantic:
+          'Your romantic connection is enhanced today. You\'ll feel more in sync emotionally, and it\'s a great day for quality time together or expressing feelings.',
+        family:
+          'Strong family harmony today. Everyone is more understanding and patient with each other. Good day for family activities or important conversations.',
+        friend:
+          'Your friendship is strengthened today. You\'ll enjoy each other\'s company more and find it easier to connect. Great day for catching up or doing something fun.',
+        colleague:
+          'Strong professional alignment today. You\'ll work well together, communicate clearly, and make good progress on shared goals. Ideal for collaborative tasks.',
+        other:
+          'Your connection is enhanced positively today. Interactions feel smooth and mutually supportive, making it a good day for any shared activities.',
+      },
+      'B+': {
+        romantic:
+          'Your relationship is well-supported today. You\'ll feel more connected and understanding of each other. Good day for spending time together or having meaningful conversations.',
+        family:
+          'Positive family dynamics today. Communication flows better than usual, and there\'s more patience and understanding. Suitable for family gatherings or discussions.',
+        friend:
+          'Your friendship feels more comfortable today. You\'ll enjoy each other\'s company and find it easy to connect. Nice day for casual hangouts or shared interests.',
+        colleague:
+          'Favorable working conditions today. You\'ll collaborate effectively and communicate well. Good day for team projects or important discussions.',
+        other:
+          'Your connection is supported positively today. Interactions feel comfortable and mutually beneficial, making it a pleasant day for shared activities.',
+      },
+      B: {
+        romantic:
+          'Your connection is slightly enhanced today. You\'ll feel a bit more in sync than usual. Decent day for casual time together or light conversations.',
+        family:
+          'Slightly better family dynamics today. Communication is smoother than average, and there\'s decent understanding. Fine day for routine family activities.',
+        friend:
+          'Your friendship feels slightly more comfortable today. You\'ll enjoy each other\'s company a bit more than usual. Nice day for casual interactions.',
+        colleague:
+          'Slightly favorable working conditions today. Collaboration feels smoother than average, and communication is decent. Fine day for regular work tasks.',
+        other:
+          'Your connection is slightly supported today. Interactions feel a bit more comfortable than usual, making it a decent day for shared activities.',
+      },
+      C: {
+        romantic:
+          'Neutral day for your relationship. It\'s an ordinary day with no significant shifts. Business as usual in your connection.',
+        family:
+          'Neutral family dynamics today. No major changes in how you interact. Routine day with standard family interactions.',
+        friend:
+          'Neutral day for your friendship. It\'s a regular day with typical interactions. Nothing special, nothing challenging.',
+        colleague:
+          'Neutral working conditions today. Standard collaboration and communication. Normal day for work interactions.',
+        other:
+          'Neutral day for your connection. Interactions are routine with no significant changes. Ordinary day.',
+      },
+      'D+': {
+        romantic:
+          'Minor friction in your relationship today. You might feel slightly out of sync or have small misunderstandings. Best to be patient and communicate clearly.',
+        family:
+          'Minor family tension today. Small misunderstandings or irritations may arise. Good day to practice patience and avoid sensitive topics.',
+        friend:
+          'Slight awkwardness in your friendship today. You might feel a bit disconnected or have minor miscommunications. Best to keep interactions light.',
+        colleague:
+          'Minor professional friction today. Communication might be slightly off, or you may have small disagreements. Good day to be extra clear and patient.',
+        other:
+          'Minor challenges in your connection today. Interactions might feel slightly strained or awkward. Best to keep things simple and be patient.',
+      },
+      D: {
+        romantic:
+          'Noticeable challenges in your relationship today. You may feel disconnected or have misunderstandings. Best to avoid important conversations and give each other space.',
+        family:
+          'Noticeable family tension today. Communication may be difficult, and misunderstandings are more likely. Good day to avoid sensitive topics and be extra patient.',
+        friend:
+          'Your friendship feels strained today. You might feel disconnected or have miscommunications. Best to keep interactions brief and light.',
+        colleague:
+          'Noticeable professional challenges today. Communication may be difficult, and collaboration could feel strained. Good day to be extra clear and avoid complex projects.',
+        other:
+          'Noticeable challenges in your connection today. Interactions may feel strained or uncomfortable. Best to keep things simple and be patient.',
+      },
+      F: {
+        romantic:
+          'Significant challenges in your relationship today. You may feel very out of sync, have major misunderstandings, or experience emotional friction. Best to avoid important discussions and give each other space today.',
+        family:
+          'Significant family tension today. Communication will be difficult, and conflicts are more likely. Best to avoid sensitive topics, practice extra patience, and consider postponing important family discussions.',
+        friend:
+          'Your friendship feels very strained today. You might feel disconnected, have major miscommunications, or experience awkwardness. Best to keep interactions minimal and avoid deep conversations.',
+        colleague:
+          'Significant professional challenges today. Communication will be difficult, collaboration will feel strained, and misunderstandings are likely. Best to avoid important meetings, be extra clear in communications, and postpone complex projects if possible.',
+        other:
+          'Significant challenges in your connection today. Interactions will feel very strained or uncomfortable. Best to minimize contact, keep things simple, and be extra patient if interaction is necessary.',
+      },
     };
+
+    return insights[letterGrade]?.[relationshipType] || 'Neutral day for your connection';
+  }
+
+  /**
+   * Convert daily adjustment to letter grade
+   * Letter grade reflects how good/bad TODAY is, regardless of base compatibility
+   * A+ = exceptional day, F = very challenging day
+   */
+  private adjustmentToLetterGrade(adjustment: number): string {
+    if (adjustment >= 10) return 'A+';
+    if (adjustment >= 7) return 'A';
+    if (adjustment >= 4) return 'B+';
+    if (adjustment >= 1) return 'B';
+    if (adjustment >= -1) return 'C';
+    if (adjustment >= -4) return 'D+';
+    if (adjustment >= -7) return 'D';
+    return 'F';
   }
 
   /**
@@ -2781,15 +3521,25 @@ export class SajuService {
     }
 
     if (controllingPairs[reversePairKey]) {
+      // When reverse pair is found, element2 controls element1
+      // Generate description from Person1's perspective (element1)
+      const reverseDescription = controllingPairs[reversePairKey];
+      // Swap the description: if template says "Fire controls Metal—your intensity refines their structure"
+      // and we have Metal-Fire, we need "Metal is controlled by Fire—their intensity refines your structure"
+      // But simpler: just swap "your" and "their" and adjust the control direction
+      const swappedDescription = reverseDescription
+        .replace(/your/g, 'TEMP_YOUR')
+        .replace(/their/g, 'your')
+        .replace(/TEMP_YOUR/g, 'their')
+        .replace(new RegExp(`${element2} controls ${element1}`, 'i'), `${element2} controls ${element1}`)
+        .replace(new RegExp(`${element2}—`, 'i'), `${element2}—`);
+      
       return {
         person1Element: element1,
         person2Element: element2,
         interactionType: 'Controlling',
         cycle: `${element2} controls ${element1}`,
-        description: controllingPairs[reversePairKey].replace(
-          /your|their/g,
-          (match) => (match === 'your' ? 'their' : 'your'),
-        ),
+        description: `${element2} controls ${element1}—${swappedDescription.split('—')[1] || swappedDescription}`,
       };
     }
 
@@ -2806,17 +3556,25 @@ export class SajuService {
   /**
    * Calculate compatibility score (0-100) using traditional Bazi factors
    *
-   * Traditional weights:
+   * Base weights (for romantic relationships):
    * - 40%: Ten Gods harmony (how charts support each other)
-   * - 25%: Marriage Palace (Day Branch interactions)
+   * - 25%: Marriage Palace (Day Branch interactions) - romantic focus
    * - 20%: Favorable element match
    * - 10%: Element cycle harmony
    * - 5%: Chart strength balance
+   *
+   * Weights adjust based on relationship type:
+   * - Romantic: Full Marriage Palace weight (25%)
+   * - Colleague: Reduced Marriage Palace (5%), increased Ten Gods (50%), increased Favorable Elements (30%)
+   * - Family: Reduced Marriage Palace (10%), increased Ten Gods (45%)
+   * - Friend: Reduced Marriage Palace (15%), increased Ten Gods (42%)
+   * - Other: Reduced Marriage Palace (15%), increased Ten Gods (42%)
    */
   private calculateCompatibilityScore(
     userContext1: UserContext,
     userContext2: UserContext,
     interactionType: string,
+    relationshipType?: 'romantic' | 'family' | 'friend' | 'colleague' | 'other',
   ): {
     overall: number;
     rating:
@@ -2827,42 +3585,45 @@ export class SajuService {
       | 'Very Challenging';
     headline: string;
   } {
-    let score = 0;
-
-    // 1. TEN GODS HARMONY (40 points max) - Traditional priority #1
-    // Check if Person 1's strong elements support Person 2's favorable elements
-    const tenGodsScore = this.calculateTenGodsHarmony(
-      userContext1,
-      userContext2,
-    );
-    score += tenGodsScore; // 0-40
-
-    // 2. MARRIAGE PALACE (25 points max) - Traditional priority #2
-    // Day Branch (日支) interactions - critical for relationship compatibility
-    const marriagePalaceScore = this.calculateMarriagePalaceScore(
+    // Calculate raw scores for each factor
+    const tenGodsRaw = this.calculateTenGodsHarmony(userContext1, userContext2);
+    const marriagePalaceRaw = this.calculateMarriagePalaceScore(
       userContext1.natalStructure.personal.branch,
       userContext2.natalStructure.personal.branch,
     );
-    score += marriagePalaceScore; // 0-25
-
-    // 3. FAVORABLE ELEMENT MATCH (20 points max) - Traditional priority #3
-    // Do their favorable elements help each other?
-    const favorableScore = this.calculateFavorableElementMatch(
+    const favorableRaw = this.calculateFavorableElementMatch(
       userContext1,
       userContext2,
     );
-    score += favorableScore; // 0-20
-
-    // 4. ELEMENT CYCLE (10 points max) - Supporting factor
-    const elementScore = this.calculateElementCycleScore(interactionType);
-    score += elementScore; // 0-10
-
-    // 5. CHART STRENGTH BALANCE (5 points max) - Minor factor
-    const balanceScore = this.calculateChartStrengthBalance(
+    const elementCycleRaw = this.calculateElementCycleScore(interactionType);
+    const balanceRaw = this.calculateChartStrengthBalance(
       userContext1.chartStrength.strength,
       userContext2.chartStrength.strength,
     );
-    score += balanceScore; // 0-5
+
+    // Define factor weights based on relationship type
+    // Format: [Ten Gods, Marriage Palace, Favorable Elements, Element Cycle, Chart Balance]
+    const weightProfiles: Record<
+      'romantic' | 'family' | 'friend' | 'colleague' | 'other',
+      [number, number, number, number, number]
+    > = {
+      romantic: [40, 25, 20, 10, 5], // Traditional weights - Marriage Palace important
+      colleague: [50, 5, 30, 10, 5], // Minimal Marriage Palace, emphasize Ten Gods & Favorable Elements
+      family: [45, 10, 25, 12, 8], // Reduced Marriage Palace, balanced other factors
+      friend: [42, 15, 23, 12, 8], // Slightly reduced Marriage Palace
+      other: [42, 15, 23, 12, 8], // Same as friend
+    };
+
+    const weights =
+      weightProfiles[relationshipType || 'romantic'] || weightProfiles.romantic;
+
+    // Apply weights to raw scores (normalize to 0-100 scale)
+    let score = 0;
+    score += (tenGodsRaw / 40) * weights[0]; // Ten Gods (0-40 raw → weighted)
+    score += (marriagePalaceRaw / 25) * weights[1]; // Marriage Palace (0-25 raw → weighted)
+    score += (favorableRaw / 20) * weights[2]; // Favorable Elements (0-20 raw → weighted)
+    score += (elementCycleRaw / 10) * weights[3]; // Element Cycle (0-10 raw → weighted)
+    score += (balanceRaw / 5) * weights[4]; // Chart Balance (0-5 raw → weighted)
 
     // Clamp to 0-100
     score = Math.max(0, Math.min(100, score));
@@ -2894,6 +3655,67 @@ export class SajuService {
       rating,
       headline: headlines[interactionType] || 'A Unique Pairing',
     };
+  }
+
+  /**
+   * Get base compatibility score (0-100) without LLM calls
+   * Lightweight method for endpoints that only need a score, not full analysis
+   */
+  async getBaseCompatibilityScore(
+    person1Data: {
+      birthDateTime: Date;
+      gender: 'male' | 'female';
+      birthTimezone: string;
+      isTimeKnown: boolean;
+    },
+    person2Data: {
+      birthDateTime: Date;
+      gender: 'male' | 'female';
+      birthTimezone: string;
+      isTimeKnown: boolean;
+    },
+    relationshipType?: 'romantic' | 'family' | 'friend' | 'colleague' | 'other',
+  ): Promise<number> {
+    // Build UserContext for both people (fast, no LLM)
+    const calc1 = new BaziCalculator(
+      person1Data.birthDateTime,
+      person1Data.gender,
+      person1Data.birthTimezone,
+      person1Data.isTimeKnown,
+    );
+    const calc2 = new BaziCalculator(
+      person2Data.birthDateTime,
+      person2Data.gender,
+      person2Data.birthTimezone,
+      person2Data.isTimeKnown,
+    );
+
+    const analysis1 = calc1.getCompleteAnalysis();
+    const analysis2 = calc2.getCompleteAnalysis();
+    if (!analysis1 || !analysis2) {
+      return 50; // Default neutral score
+    }
+
+    const userContext1 = BaziDataExtractor.buildUserContext(analysis1);
+    const userContext2 = BaziDataExtractor.buildUserContext(analysis2);
+
+    // Get element interaction
+    const identity1 = this.generateIdentity(userContext1);
+    const identity2 = this.generateIdentity(userContext2);
+    const elementInteraction = this.calculateElementInteraction(
+      identity1.element as ElementType,
+      identity2.element as ElementType,
+    );
+
+    // Calculate score using lightweight method (no LLM)
+    const scoreResult = this.calculateCompatibilityScore(
+      userContext1,
+      userContext2,
+      elementInteraction.interactionType,
+      relationshipType,
+    );
+
+    return scoreResult.overall;
   }
 
   /**
@@ -3863,13 +4685,13 @@ export class SajuService {
    * Generate compatibility introduction text
    * Explains why this pairing got this title and what it means
    */
-  private generateCompatibilityIntroduction(
+  private async generateCompatibilityIntroduction(
     identity1: any,
     identity2: any,
     elementInteraction: any,
-    scoreBreakdownSummary: any,
-    overallScore: number,
-  ): string {
+    scoreBreakdownSummary: any | null,
+    overallScore: number | null,
+  ): Promise<string> {
     // Build explanation based on element interaction type
     let elementExplanation = '';
     switch (elementInteraction.interactionType) {
@@ -3889,30 +4711,34 @@ export class SajuService {
         elementExplanation = `${identity1.element} and ${identity2.element} interact in a balanced way, with neither dominating nor yielding.`;
     }
 
-    // Add score context
-    const scoreContext =
-      overallScore >= 70
-        ? 'This creates a strong foundation for connection across multiple areas of life.'
-        : overallScore >= 50
-          ? 'This creates a solid foundation with room for growth in specific areas.'
-          : 'This creates opportunities for complementary balance, though differences require conscious navigation.';
+    // Add context (no score-based context anymore since we removed scoring)
+    const context = 'This creates a unique dynamic that shapes how you connect across different areas of life.';
 
-    // Add dominant strength insight
-    const dominantCategory = scoreBreakdownSummary.strongest.category;
-    const dominantPercentage = scoreBreakdownSummary.strongest.percentage;
+    return `${elementExplanation} ${context}`;
+  }
 
-    let strengthContext = '';
-    if (dominantPercentage >= 70) {
-      const categoryDescriptions: Record<string, string> = {
-        Romance: 'emotional and romantic chemistry',
-        Work: 'collaboration and shared goals',
-        Lifestyle: 'daily habits and values',
-        Communication: 'natural flow of ideas and understanding',
-      };
-      strengthContext = ` Your strongest alignment is in ${categoryDescriptions[dominantCategory] || 'compatibility'}—this is where your energies naturally sync.`;
+  /**
+   * Get description of element interaction type for LLM prompts
+   */
+  private getInteractionTypeDescription(
+    interactionType: 'Generative' | 'Controlling' | 'Harmonious' | 'Conflicting' | 'Neutral',
+    element1: string,
+    element2: string,
+  ): string {
+    switch (interactionType) {
+      case 'Generative':
+        return `${element1} creates/nourishes ${element2} - natural support and growth. Scores should lean toward Compatible/Highly Compatible.`;
+      case 'Controlling':
+        return `${element1} controls/challenges ${element2} - creates structure but requires balance. Scores should be Neutral to Challenging depending on context.`;
+      case 'Harmonious':
+        return `Both share ${element1} energy - natural resonance and understanding. Scores should lean toward Compatible/Highly Compatible.`;
+      case 'Conflicting':
+        return `${element1} and ${element2} create tension - can spark innovation but requires effort. Scores should be Challenging to Highly Challenging.`;
+      case 'Neutral':
+        return `${element1} and ${element2} have minimal interaction - compatibility depends on other factors. Scores should be Neutral to Compatible.`;
+      default:
+        return 'Mixed interactions - evaluate based on other chart factors.';
     }
-
-    return `${elementExplanation} ${scoreContext}${strengthContext}`;
   }
 
   /**
@@ -3999,10 +4825,27 @@ export class SajuService {
     };
 
     // Interaction between them
+    // Visual should show who controls/creates whom based on cycle direction
+    let visual: string;
+    if (elementInteraction.interactionType === 'Controlling' || elementInteraction.interactionType === 'Generative') {
+      // Extract direction from cycle: "Fire controls Metal" or "Fire creates Metal"
+      const cycleParts = elementInteraction.cycle.split(' ');
+      if (cycleParts.length >= 3 && (cycleParts[1] === 'controls' || cycleParts[1] === 'creates')) {
+        const controller = cycleParts[0];
+        const controlled = cycleParts[2];
+        visual = `${controller} → ${controlled}`;
+      } else {
+        // Fallback to original
+        visual = `${identity1.element} → ${identity2.element}`;
+      }
+    } else {
+      visual = `${identity1.element} ↔ ${identity2.element}`;
+    }
+    
     const interaction = {
-      visual: `${identity1.element} → ${identity2.element}`,
+      visual,
       type: elementInteraction.interactionType,
-      description: elementInteraction.explanation,
+      description: elementInteraction.description,
     };
 
     // Full charts for expandable section
@@ -4303,7 +5146,7 @@ export class SajuService {
 
   private buildTechnicalBasis(
     elementInteraction: any,
-    score: any,
+    score: any | null,
     userContext1: UserContext,
     userContext2: UserContext,
   ): any {
@@ -4421,7 +5264,7 @@ Generate 6-7 sentences total (2 intro + 4-5 dynamic explanation):
 `.trim();
 
     const { text } = await generateText({
-      model: geminiClient('gemini-2.0-flash-exp'),
+      model: geminiClient('gemini-2.5-flash'),
       temperature: 0.7,
       experimental_telemetry: { isEnabled: true },
       messages: [
@@ -4433,5 +5276,1806 @@ Generate 6-7 sentences total (2 intro + 4-5 dynamic explanation):
     });
 
     return text.trim();
+  }
+
+  /**
+   * Calculate baseline scores for percentile normalization
+   * Uses daily analysis to get average score
+   */
+  private calculateBaselineScores(
+    userContext: UserContext,
+    luckEra: RawBaziData['luckEra'],
+  ): {
+    overall: number;
+    career: number;
+    wealth: number;
+    relationships: number;
+    health: number;
+    creativity: number;
+  } {
+    // Baseline is just the average (50) + luck era adjustments
+    // This represents the user's "average day" without hourly variation
+    const baseScore = 50;
+    let career = baseScore;
+    let wealth = baseScore;
+    let relationships = baseScore;
+    let health = baseScore;
+    let creativity = baseScore;
+
+    // Add luck era Ten God adjustments (constant for the day)
+    if (luckEra?.tenGod) {
+      const tenGodAdjustments = this.getTenGodCategoryAdjustments(luckEra.tenGod);
+      career += tenGodAdjustments.career;
+      wealth += tenGodAdjustments.wealth;
+      relationships += tenGodAdjustments.relationships;
+      health += tenGodAdjustments.health;
+      creativity += tenGodAdjustments.creativity;
+    }
+
+    return {
+      overall: Math.round((career + wealth + relationships + health + creativity) / 5),
+      career: Math.round(career),
+      wealth: Math.round(wealth),
+      relationships: Math.round(relationships),
+      health: Math.round(health),
+      creativity: Math.round(creativity),
+    };
+  }
+
+  /**
+   * Normalize scores relative to baseline for meaningful daily variation
+   * Ensures everyone experiences good and bad days regardless of natal chart strength
+   */
+  private normalizeScoresRelativeToBaseline(
+    scores: { overall: number; career: number; wealth: number; relationships: number; health: number; creativity: number },
+    baseline: { overall: number; career: number; wealth: number; relationships: number; health: number; creativity: number },
+  ): {
+    overall: number;
+    career: number;
+    wealth: number;
+    relationships: number;
+    health: number;
+    creativity: number;
+  } {
+    // Calculate deviation from baseline
+    const careerDeviation = scores.career - baseline.career;
+    const wealthDeviation = scores.wealth - baseline.wealth;
+    const relationshipsDeviation = scores.relationships - baseline.relationships;
+    const healthDeviation = scores.health - baseline.health;
+    const creativityDeviation = scores.creativity - baseline.creativity;
+
+    // Map deviation to percentile-based score (ensures meaningful variation)
+    const career = this.mapDeviationToScore(careerDeviation);
+    const wealth = this.mapDeviationToScore(wealthDeviation);
+    const relationships = this.mapDeviationToScore(relationshipsDeviation);
+    const health = this.mapDeviationToScore(healthDeviation);
+    const creativity = this.mapDeviationToScore(creativityDeviation);
+
+    return {
+      overall: Math.round((career + wealth + relationships + health + creativity) / 5),
+      career,
+      wealth,
+      relationships,
+      health,
+      creativity,
+    };
+  }
+
+  /**
+   * Map deviation from baseline to a 0-100 score
+   * For hourly scores: allows wider variation since we only use variable factors
+   */
+  private mapDeviationToScore(deviation: number): number {
+    // For hourly scores, allow wider variation (-40 to +40) since we removed constants
+    const normalizedDeviation = Math.max(-40, Math.min(40, deviation));
+
+    // Map to 0-100 score: baseline (50) + deviation
+    const score = 50 + normalizedDeviation;
+
+    // Clamp to 0-100
+    return Math.max(0, Math.min(100, Math.round(score)));
+  }
+
+  /**
+   * Get today's full BaZi data for LLM generation
+   * Returns scores, userContext, dailyRawData, and dailyAnalysis
+   */
+  async getTodayForecastData(
+    birthDateTime: Date,
+    gender: 'male' | 'female',
+    birthTimezone: string,
+    isTimeKnown: boolean,
+    targetDate: Date,
+    currentTimezone: string,
+  ): Promise<{
+    scores: {
+      overall: number;
+      career: number;
+      wealth: number;
+      relationships: number;
+      health: number;
+      creativity: number;
+    };
+    userContext: UserContext;
+    dailyRawData: RawBaziData;
+    dailyAnalysis: PersonalizedDailyAnalysisOutput;
+  }> {
+    const calculator = new BaziCalculator(
+      birthDateTime,
+      gender,
+      birthTimezone,
+      isTimeKnown,
+    );
+
+    const baseAnalysis = calculator.getCompleteAnalysis();
+    if (!baseAnalysis) {
+      throw new Error('Failed to get complete analysis');
+    }
+
+    const userContext = BaziDataExtractor.buildUserContext(baseAnalysis);
+
+    const dailyAnalysis = calculator.getAnalysisForDate(
+      targetDate,
+      currentTimezone,
+      { type: 'personalized' },
+    ) as PersonalizedDailyAnalysisOutput | null;
+
+    if (!dailyAnalysis) {
+      throw new Error('Failed to get daily analysis');
+    }
+
+    // Get general analysis for annual/monthly pillars
+    const generalAnalysis = calculator.getAnalysisForDate(
+      targetDate,
+      currentTimezone,
+      { type: 'general' },
+    ) as any;
+
+    const dailyRawData = BaziDataExtractor.extract(userContext, dailyAnalysis, generalAnalysis);
+    
+    // Debug Hour pillar Ten God
+    if (isTimeKnown) {
+      const hourPillar = baseAnalysis.detailedPillars?.hour;
+      const dayMasterStem = baseAnalysis.detailedPillars?.day?.heavenlyStem;
+      
+      this.logger.log(`🔍 Hour Pillar Debug (isTimeKnown=${isTimeKnown}):`);
+      this.logger.log(`  - hourPillar exists: ${!!hourPillar}`);
+      if (hourPillar) {
+        this.logger.log(`  - hourPillar.heavenlyStem exists: ${!!hourPillar.heavenlyStem}`);
+        this.logger.log(`  - hourPillar.heavenlyStemTenGod exists: ${!!hourPillar.heavenlyStemTenGod}`);
+        if (hourPillar.heavenlyStemTenGod) {
+          this.logger.log(`  - hourPillar.heavenlyStemTenGod.name: ${hourPillar.heavenlyStemTenGod.name || 'null'}`);
+        }
+        if (hourPillar.heavenlyStem) {
+          this.logger.log(`  - Hour stem: ${hourPillar.heavenlyStem.character} (${hourPillar.heavenlyStem.elementType}-${hourPillar.heavenlyStem.yinYang})`);
+        }
+        if (dayMasterStem) {
+          this.logger.log(`  - Day Master stem: ${dayMasterStem.character} (${dayMasterStem.elementType}-${dayMasterStem.yinYang})`);
+          this.logger.log(`  - Hour stem === Day Master stem: ${hourPillar.heavenlyStem?.value === dayMasterStem.value}`);
+        }
+      }
+      this.logger.log(`  - dailyRawData.natalStructure.innovation exists: ${!!dailyRawData.natalStructure.innovation}`);
+      if (dailyRawData.natalStructure.innovation) {
+        this.logger.log(`  - dailyRawData.natalStructure.innovation.tenGod: ${dailyRawData.natalStructure.innovation.tenGod || 'null'}`);
+      }
+    }
+    
+    // Fix transit Ten Gods (Annual and Monthly) - calculate relative to Day Master
+    const dayMasterStem = baseAnalysis.detailedPillars?.day?.heavenlyStem;
+    if (dayMasterStem && generalAnalysis) {
+      try {
+        // Map Pinyin Ten God names to canonical English names
+        const mapPinyinToCanonical: Record<string, string> = {
+          'Zheng Guan': 'Direct Officer',
+          'Qi Sha': '7 Killings',
+          'Zheng Cai': 'Direct Wealth',
+          'Pian Cai': 'Indirect Wealth',
+          'Zheng Yin': 'Direct Resource',
+          'Pian Yin': 'Indirect Resource',
+          'Shi Shen': 'Eating God',
+          'Shang Guan': 'Hurting Officer',
+          'Bi Jian': 'Friend',
+          'Jie Cai': 'Rob Wealth',
+        };
+
+        // Fix Annual pillar Ten God
+        const annualPillarContext = generalAnalysis.annualPillarContext as any;
+        if (annualPillarContext?.stemElement && annualPillarContext?.stemYinYang && dailyRawData.periodContext?.annualPillar) {
+          // Construct stem object matching dayMasterStem structure (elementType, yinYang, value)
+          const annualStem = {
+            elementType: annualPillarContext.stemElement,
+            yinYang: annualPillarContext.stemYinYang,
+            value: dayMasterStem.value || 0, // value is numeric index (0-9), use dayMasterStem's if available
+          };
+          
+          // Use traditional calculation method (more reliable than library's calculateTenGod)
+          const tenGodPinyin = this.calculateTenGodTraditional(dayMasterStem, annualStem);
+          const annualTenGod = mapPinyinToCanonical[tenGodPinyin] || tenGodPinyin;
+          
+          (dailyRawData.periodContext.annualPillar as any).tenGod = annualTenGod;
+          this.logger.log(`✅ Fixed Annual Ten God: ${annualTenGod} (from ${tenGodPinyin})`);
+        }
+
+        // Fix Monthly pillar Ten God
+        const monthlyPillarContext = generalAnalysis.monthlyPillarContext as any;
+        if (monthlyPillarContext?.stemElement && monthlyPillarContext?.stemYinYang && dailyRawData.periodContext?.monthlyPillar) {
+          // Construct stem object matching dayMasterStem structure (elementType, yinYang, value)
+          const monthlyStem = {
+            elementType: monthlyPillarContext.stemElement,
+            yinYang: monthlyPillarContext.stemYinYang,
+            value: dayMasterStem.value || 0, // value is numeric index (0-9), use dayMasterStem's if available
+          };
+          
+          // Use traditional calculation method (more reliable than library's calculateTenGod)
+          const tenGodPinyin = this.calculateTenGodTraditional(dayMasterStem, monthlyStem);
+          const monthlyTenGod = mapPinyinToCanonical[tenGodPinyin] || tenGodPinyin;
+          
+          (dailyRawData.periodContext.monthlyPillar as any).tenGod = monthlyTenGod;
+          this.logger.log(`✅ Fixed Monthly Ten God: ${monthlyTenGod} (from ${tenGodPinyin})`);
+        }
+      } catch (error) {
+        this.logger.warn(`Could not calculate transit Ten Gods: ${error}`);
+        this.logger.warn(`Error stack: ${(error as Error).stack}`);
+      }
+    } else {
+      this.logger.warn(`⚠️ Missing prerequisites for transit Ten God calculation: dayMasterStem=${!!dayMasterStem}, generalAnalysis=${!!generalAnalysis}`);
+    }
+    
+    // Fix luck era if it's null but user is actually in a luck cycle
+    // Use age-based detection (same as getLuckCycles) since getCurrentLuckPillar has date comparison issues
+    this.logger.log(`🔍 Luck Era Debug: dailyRawData.luckEra=${!!dailyRawData.luckEra}, tenGod=${dailyRawData.luckEra?.tenGod || 'null'}, isTimeKnown=${isTimeKnown}`);
+    if (!dailyRawData.luckEra || !dailyRawData.luckEra.tenGod) {
+      const allLuckPillars = baseAnalysis.luckPillars?.pillars || [];
+      this.logger.log(`🔍 Luck Era Debug: allLuckPillars.length=${allLuckPillars.length}`);
+      
+      if (allLuckPillars.length > 0) {
+        // Calculate current age
+        const currentAge = Math.floor((targetDate.getTime() - birthDateTime.getTime()) / (1000 * 60 * 60 * 24 * 365.25));
+        const currentYear = targetDate.getFullYear();
+        this.logger.log(`🔍 Luck Era Debug: currentAge=${currentAge}, currentYear=${currentYear}, birthYear=${birthDateTime.getFullYear()}`);
+        
+        // Fill in missing yearStart/yearEnd for pillars when time is unknown (same as getLuckCycles)
+        if (!isTimeKnown) {
+          const birthYear = birthDateTime.getFullYear();
+          const estimatedFirstPillarStartAge = 8;
+          const estimatedFirstPillarStartYear = birthYear + estimatedFirstPillarStartAge;
+          
+          for (let i = 1; i < allLuckPillars.length; i++) {
+            const pillar = allLuckPillars[i];
+            if (pillar.yearStart === null || pillar.yearEnd === null) {
+              const pillarStartYear = estimatedFirstPillarStartYear + (i - 1) * 10;
+              const pillarEndYear = pillarStartYear + 9;
+              (pillar as any).yearStart = pillarStartYear;
+              (pillar as any).yearEnd = pillarEndYear;
+              (pillar as any).ageStart = estimatedFirstPillarStartAge + (i - 1) * 10;
+              this.logger.log(`🔍 Luck Era Debug: Filled Pillar ${i}: ageStart=${(pillar as any).ageStart}, yearStart=${pillarStartYear}, yearEnd=${pillarEndYear}`);
+            }
+          }
+        }
+        
+        // Find current luck pillar by age/year (skip Pillar 0 - Pre-Luck Era)
+        let currentLuckPillar = null;
+        let foundPillarIndex = -1;
+        for (let i = 1; i < allLuckPillars.length; i++) {
+          const pillar = allLuckPillars[i];
+          const ageStart = pillar.ageStart;
+          const pillarAgeEnd = ageStart !== null ? ageStart + 9 : null; // Each cycle is 10 years
+          const yearStart = pillar.yearStart;
+          const yearEnd = pillar.yearEnd;
+          
+          this.logger.log(`🔍 Luck Era Debug: Pillar ${i}: ageStart=${ageStart}, ageEnd=${pillarAgeEnd}, yearStart=${yearStart}, yearEnd=${yearEnd}`);
+          
+          // Check if current age/year falls within this pillar's range
+          const ageMatch = ageStart !== null && pillarAgeEnd !== null && currentAge >= ageStart && currentAge <= pillarAgeEnd;
+          const yearMatch = yearStart !== null && yearEnd !== null && currentYear >= yearStart && currentYear <= yearEnd;
+          
+          this.logger.log(`🔍 Luck Era Debug: Pillar ${i}: ageMatch=${ageMatch}, yearMatch=${yearMatch}`);
+          
+          if (ageMatch || yearMatch) {
+            currentLuckPillar = pillar;
+            foundPillarIndex = i;
+            this.logger.log(`🔍 Luck Era Debug: ✅ Found matching pillar at index ${i}`);
+            break;
+          }
+        }
+        
+        if (currentLuckPillar) {
+          // User is in an actual luck cycle (not Pre-Luck Era)
+          // Calculate Ten God for this pillar
+          const dayMasterStem = baseAnalysis.detailedPillars?.day?.heavenlyStem;
+          const luckPillarStem = currentLuckPillar.heavenlyStem;
+          
+          this.logger.log(`🔍 Luck Era Debug: dayMasterStem=${!!dayMasterStem}, luckPillarStem=${!!luckPillarStem}`);
+          
+          if (dayMasterStem && luckPillarStem) {
+            // Use traditional calculation method (more reliable than library's calculateTenGod)
+            try {
+              // Map Pinyin Ten God names to canonical English names
+              const mapPinyinToCanonical: Record<string, string> = {
+                'Zheng Guan': 'Direct Officer',
+                'Qi Sha': '7 Killings',
+                'Zheng Cai': 'Direct Wealth',
+                'Pian Cai': 'Indirect Wealth',
+                'Zheng Yin': 'Direct Resource',
+                'Pian Yin': 'Indirect Resource',
+                'Shi Shen': 'Eating God',
+                'Shang Guan': 'Hurting Officer',
+                'Bi Jian': 'Friend',
+                'Jie Cai': 'Rob Wealth',
+              };
+              
+              // Use traditional calculation method
+              const tenGodPinyin = this.calculateTenGodTraditional(dayMasterStem, luckPillarStem);
+              const tenGodName = mapPinyinToCanonical[tenGodPinyin] || tenGodPinyin;
+              
+              dailyRawData.luckEra = {
+                tenGod: tenGodName,
+                stemElement: luckPillarStem.elementType as ElementType,
+                stemYinYang: luckPillarStem.yinYang as 'Yin' | 'Yang',
+              };
+              
+              this.logger.log(`✅ Fixed luck era: ${tenGodName} (from ${tenGodPinyin}, ${luckPillarStem.elementType}) for age ${currentAge}, pillar index ${foundPillarIndex}`);
+            } catch (error) {
+              // If we can't calculate Ten God, leave luckEra as null (Pre-Luck Era)
+              this.logger.warn(`Could not calculate Ten God for luck pillar: ${error}`);
+              this.logger.warn(`Error stack: ${(error as Error).stack}`);
+            }
+          } else {
+            this.logger.warn(`⚠️ Missing stems for luck era calculation: dayMasterStem=${!!dayMasterStem}, luckPillarStem=${!!luckPillarStem}`);
+          }
+        } else {
+          this.logger.log(`⚠️ No luck pillar found for age ${currentAge}, year ${currentYear} - treating as Pre-Luck Era`);
+        }
+      } else {
+        this.logger.warn(`⚠️ No luck pillars available in baseAnalysis`);
+      }
+    } else {
+      this.logger.log(`✅ Luck era already exists: ${dailyRawData.luckEra.tenGod || 'null'} (${dailyRawData.luckEra.stemElement})`);
+    }
+    
+    const scores = this.calculateTodayScores(
+      dailyRawData,
+      userContext,
+      dailyAnalysis,
+      undefined, // analysisDate
+      undefined, // hourPillarElement
+      undefined, // hourPillarTenGod
+      undefined, // hourPillarBranchElement
+      baseAnalysis, // baseAnalysis for daily pillar Ten God
+    );
+
+    // Normalize using baseline
+    const baseline = this.calculateBaselineScores(userContext, dailyRawData.luckEra);
+    const normalizedScores = this.normalizeScoresRelativeToBaseline(scores, baseline);
+
+    return {
+      scores: normalizedScores,
+      userContext,
+      dailyRawData,
+      dailyAnalysis,
+    };
+  }
+
+  /**
+   * Get 14-day forecast data (scores and BaZi data for each day)
+   * Returns data for next 14 days from startDate
+   */
+  async get14DayForecastData(
+    birthDateTime: Date,
+    gender: 'male' | 'female',
+    birthTimezone: string,
+    isTimeKnown: boolean,
+    startDate: Date,
+    currentTimezone: string,
+  ): Promise<{
+    days: Array<{
+      date: string; // YYYY-MM-DD
+      scores: {
+        overall: number;
+        career: number;
+        wealth: number;
+        relationships: number;
+        health: number;
+        creativity: number;
+        rest: number; // Inverse of overall (100 - overall)
+      };
+      dailyElement: string; // e.g., "WOOD-O"
+      dailyBranch: string; // e.g., "午"
+      monthlyElement: string; // e.g., "WOOD-O" (monthly element for this day)
+      elementRelationship: 'favorable' | 'unfavorable' | 'neutral';
+      activeTenGods: string[]; // Ten God technical names active on this day (for backward compatibility)
+      activeTenGodsFull: any[]; // Full ActiveTenGod objects (like daily forecast)
+      specialPatterns: string[]; // Special pattern names active on this day (for backward compatibility)
+      specialPatternsFull: any[]; // Full special pattern objects (like daily forecast)
+      dailyRawData: any; // Full raw BaZi data for this day
+      dailyAnalysis: any; // Full daily analysis for this day
+    }>;
+    userContext: UserContext;
+  }> {
+    const calculator = new BaziCalculator(
+      birthDateTime,
+      gender,
+      birthTimezone,
+      isTimeKnown,
+    );
+
+    const baseAnalysis = calculator.getCompleteAnalysis();
+    if (!baseAnalysis) {
+      throw new Error('Failed to get complete analysis');
+    }
+
+    const userContext = BaziDataExtractor.buildUserContext(baseAnalysis);
+
+    const days: Array<{
+      date: string;
+      scores: {
+        overall: number;
+        career: number;
+        wealth: number;
+        relationships: number;
+        health: number;
+        creativity: number;
+        rest: number;
+      };
+      dailyElement: string;
+      dailyBranch: string;
+      monthlyElement: string;
+      elementRelationship: 'favorable' | 'unfavorable' | 'neutral';
+      activeTenGods: string[];
+      activeTenGodsFull: any[];
+      specialPatterns: string[];
+      specialPatternsFull: any[];
+      dailyRawData: any;
+      dailyAnalysis: any;
+    }> = [];
+
+    // Calculate data for each of the 14 days
+    for (let i = 0; i < 14; i++) {
+      const targetDate = addDays(startDate, i);
+      const dateString = formatInTimeZone(targetDate, currentTimezone, 'yyyy-MM-dd');
+
+      // Get daily analysis
+      const dailyAnalysis = calculator.getAnalysisForDate(
+        targetDate,
+        currentTimezone,
+        { type: 'personalized' },
+      ) as PersonalizedDailyAnalysisOutput | null;
+
+      if (!dailyAnalysis) {
+        throw new Error(`Failed to get daily analysis for ${dateString}`);
+      }
+
+      // Get general analysis for monthly element
+      const generalAnalysis = calculator.getAnalysisForDate(
+        targetDate,
+        currentTimezone,
+        { type: 'general' },
+      ) as any;
+
+      // Extract BaZi data
+      const dailyRawData = BaziDataExtractor.extract(
+        userContext,
+        dailyAnalysis,
+        generalAnalysis,
+      );
+
+      // Fix transit Ten Gods (Annual and Monthly) - calculate relative to Day Master
+      // Same logic as getTodayForecastData
+      const dayMasterStem = baseAnalysis.detailedPillars?.day?.heavenlyStem;
+      if (dayMasterStem && generalAnalysis) {
+        try {
+          // Map Pinyin Ten God names to canonical English names
+          const mapPinyinToCanonical: Record<string, string> = {
+            'Zheng Guan': 'Direct Officer',
+            'Qi Sha': '7 Killings',
+            'Zheng Cai': 'Direct Wealth',
+            'Pian Cai': 'Indirect Wealth',
+            'Zheng Yin': 'Direct Resource',
+            'Pian Yin': 'Indirect Resource',
+            'Shi Shen': 'Eating God',
+            'Shang Guan': 'Hurting Officer',
+            'Bi Jian': 'Friend',
+            'Jie Cai': 'Rob Wealth',
+          };
+
+          // Fix Annual pillar Ten God
+          const annualPillarContext = generalAnalysis.annualPillarContext as any;
+          if (annualPillarContext?.stemElement && annualPillarContext?.stemYinYang && dailyRawData.periodContext?.annualPillar) {
+            // Construct stem object matching dayMasterStem structure (elementType, yinYang, value)
+            const annualStem = {
+              elementType: annualPillarContext.stemElement,
+              yinYang: annualPillarContext.stemYinYang,
+              value: dayMasterStem.value || 0, // value is numeric index (0-9), use dayMasterStem's if available
+            };
+            
+            // Use traditional calculation method (more reliable than library's calculateTenGod)
+            const tenGodPinyin = this.calculateTenGodTraditional(dayMasterStem, annualStem);
+            const annualTenGod = mapPinyinToCanonical[tenGodPinyin] || tenGodPinyin;
+            
+            (dailyRawData.periodContext.annualPillar as any).tenGod = annualTenGod;
+            this.logger.log(`✅ Fixed Annual Ten God: ${annualTenGod} (from ${tenGodPinyin})`);
+          }
+
+          // Fix Monthly pillar Ten God
+          const monthlyPillarContext = generalAnalysis.monthlyPillarContext as any;
+          if (monthlyPillarContext?.stemElement && monthlyPillarContext?.stemYinYang && dailyRawData.periodContext?.monthlyPillar) {
+            // Construct stem object matching dayMasterStem structure (elementType, yinYang, value)
+            const monthlyStem = {
+              elementType: monthlyPillarContext.stemElement,
+              yinYang: monthlyPillarContext.stemYinYang,
+              value: dayMasterStem.value || 0, // value is numeric index (0-9), use dayMasterStem's if available
+            };
+            
+            // Use traditional calculation method (more reliable than library's calculateTenGod)
+            const tenGodPinyin = this.calculateTenGodTraditional(dayMasterStem, monthlyStem);
+            const monthlyTenGod = mapPinyinToCanonical[tenGodPinyin] || tenGodPinyin;
+            
+            (dailyRawData.periodContext.monthlyPillar as any).tenGod = monthlyTenGod;
+            this.logger.log(`✅ Fixed Monthly Ten God: ${monthlyTenGod} (from ${tenGodPinyin})`);
+          }
+        } catch (error) {
+          this.logger.warn(`Could not calculate transit Ten Gods: ${error}`);
+          this.logger.warn(`Error stack: ${(error as Error).stack}`);
+        }
+      } else {
+        this.logger.warn(`⚠️ Missing prerequisites for transit Ten God calculation: dayMasterStem=${!!dayMasterStem}, generalAnalysis=${!!generalAnalysis}`);
+      }
+      
+      // Fix luck era if it's null but user is actually in a luck cycle
+      // Use age-based detection (same as getLuckCycles) since getCurrentLuckPillar has date comparison issues
+      if (!dailyRawData.luckEra || !dailyRawData.luckEra.tenGod) {
+        const allLuckPillars = baseAnalysis.luckPillars?.pillars || [];
+        
+        if (allLuckPillars.length > 0) {
+          // Calculate current age
+          const currentAge = Math.floor((targetDate.getTime() - birthDateTime.getTime()) / (1000 * 60 * 60 * 24 * 365.25));
+          const currentYear = targetDate.getFullYear();
+          
+          // Fill in missing yearStart/yearEnd for pillars when time is unknown (same as getLuckCycles)
+          if (!isTimeKnown) {
+            const birthYear = birthDateTime.getFullYear();
+            const estimatedFirstPillarStartAge = 8;
+            const estimatedFirstPillarStartYear = birthYear + estimatedFirstPillarStartAge;
+            
+            for (let i = 1; i < allLuckPillars.length; i++) {
+              const pillar = allLuckPillars[i];
+              if (pillar.yearStart === null || pillar.yearEnd === null) {
+                const pillarStartYear = estimatedFirstPillarStartYear + (i - 1) * 10;
+                const pillarEndYear = pillarStartYear + 9;
+                (pillar as any).yearStart = pillarStartYear;
+                (pillar as any).yearEnd = pillarEndYear;
+                (pillar as any).ageStart = estimatedFirstPillarStartAge + (i - 1) * 10;
+              }
+            }
+          }
+          
+          // Find current luck pillar by age/year (skip Pillar 0 - Pre-Luck Era)
+          let currentLuckPillar = null;
+          let foundPillarIndex = -1;
+          for (let i = 1; i < allLuckPillars.length; i++) {
+            const pillar = allLuckPillars[i];
+            const ageStart = pillar.ageStart;
+            const pillarAgeEnd = ageStart !== null ? ageStart + 9 : null; // Each cycle is 10 years
+            const yearStart = pillar.yearStart;
+            const yearEnd = pillar.yearEnd;
+            
+            // Check if current age/year falls within this pillar's range
+            const ageMatch = ageStart !== null && pillarAgeEnd !== null && currentAge >= ageStart && currentAge <= pillarAgeEnd;
+            const yearMatch = yearStart !== null && yearEnd !== null && currentYear >= yearStart && currentYear <= yearEnd;
+            
+            if (ageMatch || yearMatch) {
+              currentLuckPillar = pillar;
+              foundPillarIndex = i;
+              break;
+            }
+          }
+          
+          if (currentLuckPillar) {
+            // User is in an actual luck cycle (not Pre-Luck Era)
+            // Calculate Ten God for this pillar
+            const dayMasterStemForLuck = baseAnalysis.detailedPillars?.day?.heavenlyStem;
+            const luckPillarStem = currentLuckPillar.heavenlyStem;
+            
+            if (dayMasterStemForLuck && luckPillarStem) {
+              // Use traditional calculation method (more reliable than library's calculateTenGod)
+              try {
+                // Map Pinyin Ten God names to canonical English names
+                const mapPinyinToCanonical: Record<string, string> = {
+                  'Zheng Guan': 'Direct Officer',
+                  'Qi Sha': '7 Killings',
+                  'Zheng Cai': 'Direct Wealth',
+                  'Pian Cai': 'Indirect Wealth',
+                  'Zheng Yin': 'Direct Resource',
+                  'Pian Yin': 'Indirect Resource',
+                  'Shi Shen': 'Eating God',
+                  'Shang Guan': 'Hurting Officer',
+                  'Bi Jian': 'Friend',
+                  'Jie Cai': 'Rob Wealth',
+                };
+                
+                // Use traditional calculation method
+                const tenGodPinyin = this.calculateTenGodTraditional(dayMasterStemForLuck, luckPillarStem);
+                const tenGodName = mapPinyinToCanonical[tenGodPinyin] || tenGodPinyin;
+                
+                dailyRawData.luckEra = {
+                  tenGod: tenGodName,
+                  stemElement: luckPillarStem.elementType as ElementType,
+                  stemYinYang: luckPillarStem.yinYang as 'Yin' | 'Yang',
+                };
+                
+                this.logger.log(`✅ Fixed luck era: ${tenGodName} (from ${tenGodPinyin}, ${luckPillarStem.elementType}) for age ${currentAge}, pillar index ${foundPillarIndex}`);
+              } catch (error) {
+                // If we can't calculate Ten God, leave luckEra as null (Pre-Luck Era)
+                this.logger.warn(`Could not calculate Ten God for luck pillar: ${error}`);
+                this.logger.warn(`Error stack: ${(error as Error).stack}`);
+              }
+            } else {
+              this.logger.warn(`⚠️ Missing stems for luck era calculation: dayMasterStem=${!!dayMasterStemForLuck}, luckPillarStem=${!!luckPillarStem}`);
+            }
+          }
+        }
+      }
+
+      // Calculate scores (pass baseAnalysis for daily pillar Ten God calculation)
+      const scores = this.calculateTodayScores(
+        dailyRawData,
+        userContext,
+        dailyAnalysis,
+        undefined, // analysisDate
+        undefined, // hourPillarElement
+        undefined, // hourPillarTenGod
+        undefined, // hourPillarBranchElement
+        baseAnalysis, // baseAnalysis for daily pillar Ten God
+      );
+      const baseline = this.calculateBaselineScores(userContext, dailyRawData.luckEra);
+      const normalizedScores = this.normalizeScoresRelativeToBaseline(scores, baseline);
+
+      // Get daily element
+      const dailyElement = dailyRawData.dailyElement;
+      const dailyYinYang = dailyAnalysis.dayPillar?.stemYinYang || 'Yang';
+      const dailyElementFormatted = `${dailyElement}-${dailyYinYang === 'Yin' ? 'I' : 'O'}`;
+
+      // Get monthly element
+      const monthlyStem = generalAnalysis?.monthPillar?.heavenlyStem;
+      const monthlyYinYang = generalAnalysis?.monthPillar?.stemYinYang || 'Yang';
+      const monthlyElement = monthlyStem
+        ? `${monthlyStem.element}-${monthlyYinYang === 'Yin' ? 'I' : 'O'}`
+        : dailyElementFormatted; // Fallback to daily if monthly not available
+
+      // Get daily branch
+      const dailyBranch = dailyAnalysis.dayPillar?.branchChar || '';
+
+      // Calculate element relationship
+      const isFavorable =
+        userContext.favorableElements &&
+        (userContext.favorableElements.primary.includes(dailyElement) ||
+          userContext.favorableElements.secondary.includes(dailyElement));
+      const isUnfavorable =
+        userContext.favorableElements &&
+        userContext.favorableElements.unfavorable.includes(dailyElement);
+      const elementRelationship: 'favorable' | 'unfavorable' | 'neutral' = isFavorable
+        ? 'favorable'
+        : isUnfavorable
+          ? 'unfavorable'
+          : 'neutral';
+
+      // Extract active Ten Gods (full extraction like daily forecast)
+      const activeTenGods = extractActiveTenGods(userContext, dailyRawData, dailyAnalysis);
+      // Store technical names for aggregation
+      const tenGodTechnicalNames = activeTenGods.map((tg) => tg.technicalName);
+
+      // Extract special patterns (full extraction like daily forecast)
+      const specialPatternsData = this.extractSpecialPatterns(
+        dailyRawData,
+        dailyAnalysis,
+      );
+
+      days.push({
+        date: dateString,
+        scores: {
+          ...normalizedScores,
+          rest: 100 - normalizedScores.overall, // Inverse of overall
+        },
+        dailyElement: dailyElementFormatted,
+        dailyBranch,
+        monthlyElement,
+        elementRelationship,
+        activeTenGods: tenGodTechnicalNames, // For backward compatibility
+        activeTenGodsFull: activeTenGods, // Full extraction results
+        specialPatterns: specialPatternsData.map((p) => p.title), // For backward compatibility
+        specialPatternsFull: specialPatternsData, // Full extraction results
+        dailyRawData, // Store for potential future use
+        dailyAnalysis, // Store for potential future use
+      });
+    }
+
+    return {
+      days,
+      userContext,
+    };
+  }
+
+  /**
+   * Calculate scores for today based on traditional BaZi methods
+   * Simple, maintainable approach using library data directly
+   * Used for daily forecast (includes all factors: daily element, interactions, etc.)
+   */
+  private calculateTodayScores(
+    rawData: RawBaziData,
+    userContext: UserContext,
+    dailyAnalysis: PersonalizedDailyAnalysisOutput,
+    analysisDate?: Date, // Optional: for hourly variation in heatmap
+    hourPillarElement?: ElementType | null, // Optional: hour pillar stem element for stronger hourly variation
+    hourPillarTenGod?: string | null, // Optional: hour pillar Ten God for additional variation
+    hourPillarBranchElement?: ElementType | null, // Optional: hour pillar branch element for more variation
+    baseAnalysis?: any, // Optional: base analysis for calculating daily pillar Ten God
+  ): {
+    overall: number;
+    career: number;
+    wealth: number;
+    relationships: number;
+    health: number;
+    creativity: number;
+  } {
+    // Base score starts at 50 (neutral)
+    const baseScore = 50;
+    let career = baseScore;
+    let wealth = baseScore;
+    let relationships = baseScore;
+    let health = baseScore;
+    let creativity = baseScore;
+
+    // 1. Element favorability (reduced weight to allow category-specific factors to differentiate)
+    // Traditional BaZi: Element favorability is universal, but we reduce its weight here
+    // to allow Ten Gods and other category-specific factors to create meaningful variation
+    const elementAdjustment = this.calculateElementFavorability(
+      rawData.dailyElement,
+      userContext.favorableElements,
+    ) * 0.5; // Reduce to 50% (from ±8 to ±4) to allow category-specific factors to dominate
+    career += elementAdjustment;
+    wealth += elementAdjustment;
+    relationships += elementAdjustment;
+    health += elementAdjustment;
+    creativity += elementAdjustment;
+
+    // 2. Interactions (weighted by pillar importance per category)
+    const interactions = dailyAnalysis.interactions || [];
+    for (const interaction of interactions) {
+      const impact = this.calculateInteractionImpact(interaction);
+      if (impact === 0) continue;
+
+      // Apply weighted impact based on which pillars are involved
+      const pillarWeights = this.getPillarWeightsForInteraction(interaction);
+
+      career += impact * pillarWeights.career;
+      wealth += impact * pillarWeights.wealth;
+      relationships += impact * pillarWeights.relationships;
+      health += impact * pillarWeights.health;
+      creativity += impact * pillarWeights.creativity;
+    }
+
+    // 3. Luck Era Ten God (category-specific favorability)
+    if (rawData.luckEra?.tenGod) {
+      const tenGodAdjustments = this.getTenGodCategoryAdjustments(
+        rawData.luckEra.tenGod,
+      );
+      career += tenGodAdjustments.career;
+      wealth += tenGodAdjustments.wealth;
+      relationships += tenGodAdjustments.relationships;
+      health += tenGodAdjustments.health;
+      creativity += tenGodAdjustments.creativity;
+    }
+
+    // 3b. Daily Pillar Ten God (category-specific adjustments)
+    // Traditional BaZi: The daily pillar's Ten God (relative to Day Master) changes EVERY DAY
+    // This creates true daily variation for category-specific scores
+    // This is the key to showing different best/worst days per category
+    if (baseAnalysis && dailyAnalysis.dayPillar) {
+      const dayMasterStem = baseAnalysis.detailedPillars?.day?.heavenlyStem;
+      // Daily pillar stem element is available directly from dayPillar
+      const dailyPillarStemElement = dailyAnalysis.dayPillar.stemElement;
+      const dailyPillarStemYinYang = dailyAnalysis.dayPillar.stemYinYang;
+      
+      if (dayMasterStem && dailyPillarStemElement && dailyPillarStemYinYang) {
+        try {
+          // Construct daily pillar stem object matching dayMasterStem structure
+          const dailyPillarStem = {
+            elementType: dailyPillarStemElement,
+            yinYang: dailyPillarStemYinYang,
+            value: dayMasterStem.value || 0, // Use dayMasterStem's value as fallback
+          };
+          
+          // Calculate daily pillar Ten God relative to Day Master
+          const dailyTenGodPinyin = this.calculateTenGodTraditional(dayMasterStem, dailyPillarStem);
+          
+          // Map Pinyin to canonical name (same mapping used elsewhere)
+          const mapPinyinToCanonical: Record<string, string> = {
+            'Zheng Guan': 'Direct Officer',
+            'Qi Sha': '7 Killings',
+            'Zheng Cai': 'Direct Wealth',
+            'Pian Cai': 'Indirect Wealth',
+            'Zheng Yin': 'Direct Resource',
+            'Pian Yin': 'Indirect Resource',
+            'Shi Shen': 'Eating God',
+            'Shang Guan': 'Hurting Officer',
+            'Bi Jian': 'Friend',
+            'Jie Cai': 'Rob Wealth',
+          };
+          
+          // getTenGodCategoryAdjustments expects Pinyin names, not canonical names
+          // So use the Pinyin name directly
+          const adjustments = this.getTenGodCategoryAdjustments(dailyTenGodPinyin);
+          
+          // Traditional BaZi: Element favorability is the foundation, Ten Gods work within that context
+          // If element is favorable: Ten God benefits are amplified (full strength)
+          // If element is unfavorable: Ten God benefits are reduced (opportunities exist but require more effort)
+          // If element is neutral: Ten God benefits are at normal strength
+          const elementAdjustment = this.calculateElementFavorability(
+            rawData.dailyElement,
+            userContext.favorableElements,
+          );
+          
+          let elementModifier = 1.0; // Default: normal strength
+          if (elementAdjustment > 0) {
+            // Favorable element: amplify Ten God benefits (1.5x)
+            elementModifier = 1.5;
+          } else if (elementAdjustment < 0) {
+            // Unfavorable element: reduce Ten God benefits (0.6x - opportunities exist but require effort)
+            elementModifier = 0.6;
+          }
+          // Neutral element: elementModifier stays at 1.0
+          
+          // Base Ten God weight (strong enough to create category differentiation)
+          const baseWeight = 2.5;
+          
+          // Apply modulated adjustments (Ten God × baseWeight × elementModifier)
+          career += adjustments.career * baseWeight * elementModifier;
+          wealth += adjustments.wealth * baseWeight * elementModifier;
+          relationships += adjustments.relationships * baseWeight * elementModifier;
+          health += adjustments.health * baseWeight * elementModifier;
+          creativity += adjustments.creativity * baseWeight * elementModifier;
+        } catch (error) {
+          // If calculation fails, continue without daily Ten God adjustment
+          this.logger.warn(`Could not calculate daily pillar Ten God: ${error}`);
+        }
+      }
+    }
+
+    // 4. Special stars (category-specific bonuses)
+    // Only count stars that are ACTIVATED today (daily branch matches star's branch)
+    const specialStarsBonuses = this.calculateSpecialStarsBonuses(
+      rawData,
+      dailyAnalysis,
+    );
+    career += specialStarsBonuses.career;
+    wealth += specialStarsBonuses.wealth;
+    relationships += specialStarsBonuses.relationships;
+    health += specialStarsBonuses.health;
+    creativity += specialStarsBonuses.creativity;
+
+    // 5. Hour pillar element favorability (for heatmap hourly differences)
+    // Traditional BaZi: Each 2-hour block has a different hour pillar with different element
+    // The hour pillar's element favorability creates meaningful variation throughout the day
+    if (hourPillarElement && userContext.favorableElements) {
+      // Calculate hour pillar element favorability (STRONGER impact than daily element)
+      // Hour pillar changes every 2 hours, so it should create significant variation
+      const hourElementAdjustment = this.calculateElementFavorability(
+        hourPillarElement,
+        userContext.favorableElements,
+      ) * 1.5; // 1.5x stronger than daily element (was 8, now ±12)
+      
+      // Hour pillar primarily affects creativity (50%) and health (35%)
+      // Also affects other categories but to a lesser degree
+      creativity += hourElementAdjustment * 0.5; // Primary impact (was 0.4)
+      health += hourElementAdjustment * 0.35; // (was 0.3)
+      career += hourElementAdjustment * 0.2; // (was 0.15)
+      wealth += hourElementAdjustment * 0.15; // (was 0.1)
+      relationships += hourElementAdjustment * 0.1; // (was 0.05)
+      
+      // 5b. Hour pillar branch element favorability (additional variation)
+      // The branch element also affects the hour's energy, creating more differentiation
+      if (hourPillarBranchElement && userContext.favorableElements) {
+        const hourBranchAdjustment = this.calculateElementFavorability(
+          hourPillarBranchElement,
+          userContext.favorableElements,
+        ) * 0.8; // 0.8x strength (branch is less impactful than stem, but still significant)
+        
+        // Branch element affects different categories than stem
+        health += hourBranchAdjustment * 0.4; // Branch affects health more
+        relationships += hourBranchAdjustment * 0.3;
+        creativity += hourBranchAdjustment * 0.2;
+        career += hourBranchAdjustment * 0.15;
+        wealth += hourBranchAdjustment * 0.1;
+        
+        if (analysisDate) {
+          this.logger.log(`  - hourPillarBranchElement: ${hourPillarBranchElement}, branch adjustment: ${hourBranchAdjustment.toFixed(1)}`);
+        }
+      }
+      
+      // 5c. Hour pillar Ten God adjustments (additional variation)
+      // Different Ten Gods in the hour pillar create different energy patterns
+      if (hourPillarTenGod) {
+        const hourTenGodAdjustments = this.getTenGodCategoryAdjustments(hourPillarTenGod);
+        // Apply at 30% strength (hour pillar is less impactful than luck era, but still significant)
+        creativity += hourTenGodAdjustments.creativity * 0.3;
+        health += hourTenGodAdjustments.health * 0.3;
+        career += hourTenGodAdjustments.career * 0.2;
+        wealth += hourTenGodAdjustments.wealth * 0.2;
+        relationships += hourTenGodAdjustments.relationships * 0.15;
+        
+        if (analysisDate) {
+          this.logger.log(`  - hourPillarTenGod: ${hourPillarTenGod}, adjustments: c=${hourTenGodAdjustments.career * 0.2}, w=${hourTenGodAdjustments.wealth * 0.2}, h=${hourTenGodAdjustments.health * 0.3}, cr=${hourTenGodAdjustments.creativity * 0.3}`);
+        }
+      }
+    } else if (analysisDate) {
+      // Fallback: use hour-based variation if hour pillar not available
+      const hour = analysisDate.getHours();
+      const hourVariation = Math.sin((hour / 24) * Math.PI * 2) * 5; // Increased from 3.5 to 5
+      this.logger.log(`  - Using fallback hour variation (hour=${hour}): ${hourVariation.toFixed(2)}`);
+      creativity += hourVariation * 0.8;
+      health += hourVariation * 0.6;
+      career += hourVariation * 0.3;
+      wealth += hourVariation * 0.3;
+      relationships += hourVariation * 0.3;
+    }
+
+    // Clamp scores to 0-100
+    career = Math.max(0, Math.min(100, Math.round(career)));
+    wealth = Math.max(0, Math.min(100, Math.round(wealth)));
+    relationships = Math.max(0, Math.min(100, Math.round(relationships)));
+    health = Math.max(0, Math.min(100, Math.round(health)));
+    creativity = Math.max(0, Math.min(100, Math.round(creativity)));
+
+    // Overall is average of all categories
+    const overall = Math.round(
+      (career + wealth + relationships + health + creativity) / 5,
+    );
+
+    return {
+      overall,
+      career,
+      wealth,
+      relationships,
+      health,
+      creativity,
+    };
+  }
+
+  /**
+   * Calculate element favorability adjustment
+   * Universal: same adjustment for all categories
+   */
+  private calculateElementFavorability(
+    dailyElement: ElementType,
+    favorableElements: UserContext['favorableElements'],
+  ): number {
+    if (!favorableElements) return 0;
+
+    if (favorableElements.primary.includes(dailyElement)) {
+      return 8; // Favorable element day
+    }
+    if (favorableElements.unfavorable.includes(dailyElement)) {
+      return -8; // Unfavorable element day
+    }
+    return 0; // Neutral
+  }
+
+  /**
+   * Calculate interaction impact based on type and favorability
+   * Traditional BaZi: clashes are more impactful than harmonies
+   */
+  private calculateInteractionImpact(
+    interaction: InteractionDetail,
+  ): number {
+    const isFavorable = interaction.involvesFavorableElement || false;
+    const isUnfavorable = interaction.involvesUnfavorableElement || false;
+
+    if (!isFavorable && !isUnfavorable) return 0;
+
+    // Base impact by interaction type (traditional BaZi emphasis)
+    let baseImpact = 0;
+    switch (interaction.type) {
+      case 'BranchClash': // 地支沖 - most impactful
+      case 'StemClash': // 天干沖
+        baseImpact = 8;
+        break;
+      case 'StemCombination': // 天干合
+      case 'TrinityCombo': // 三合
+        baseImpact = 6;
+        break;
+      case 'Branch6Combo': // 六合
+      case 'DirectionalCombo': // 方合
+        baseImpact = 5;
+        break;
+      case 'BranchHarm': // 地支害
+      case 'BranchPunishment': // 地支刑
+        baseImpact = 4;
+        break;
+      default:
+        baseImpact = 3; // Other interactions
+    }
+
+    // Apply favorability
+    if (isFavorable) return baseImpact;
+    if (isUnfavorable) return -baseImpact;
+    return 0;
+  }
+
+  /**
+   * Get pillar weights for each category based on which pillars are involved
+   * Traditional BaZi: each category has primary/secondary pillars
+   *
+   * Pillar importance per category:
+   * - Career: Month (50%) > Year (20%) > Hour (20%) > Day (10%)
+   * - Wealth: Day (35%) = Month (35%) > Year (15%) > Hour (15%)
+   * - Relationships: Year (40%) = Day (40%) > Month (10%) > Hour (10%)
+   * - Health: Day (70%) > others (10% each)
+   * - Creativity: Hour (40%) > Day (30%) > Month (20%) > Year (10%)
+   */
+  private getPillarWeightsForInteraction(interaction: InteractionDetail): {
+    career: number;
+    wealth: number;
+    relationships: number;
+    health: number;
+    creativity: number;
+  } {
+    // Check which pillars are involved
+    const hasYear = interaction.participants.some((p) => p.pillar === 'Year');
+    const hasMonth = interaction.participants.some((p) => p.pillar === 'Month');
+    const hasDay = interaction.participants.some((p) => p.pillar === 'Day');
+    const hasHour = interaction.participants.some((p) => p.pillar === 'Hour');
+
+    // Calculate weights based on which pillars are involved
+    // If multiple pillars, distribute weights proportionally
+    let career = 0;
+    let wealth = 0;
+    let relationships = 0;
+    let health = 0;
+    let creativity = 0;
+
+    // Career weights: Month (0.5) > Year (0.2) > Hour (0.2) > Day (0.1)
+    if (hasMonth) career += 0.5;
+    if (hasYear) career += 0.2;
+    if (hasHour) career += 0.2;
+    if (hasDay) career += 0.1;
+
+    // Wealth weights: Day (0.35) = Month (0.35) > Year (0.15) > Hour (0.15)
+    if (hasDay) wealth += 0.35;
+    if (hasMonth) wealth += 0.35;
+    if (hasYear) wealth += 0.15;
+    if (hasHour) wealth += 0.15;
+
+    // Relationships weights: Year (0.4) = Day (0.4) > Month (0.1) > Hour (0.1)
+    if (hasYear) relationships += 0.4;
+    if (hasDay) relationships += 0.4;
+    if (hasMonth) relationships += 0.1;
+    if (hasHour) relationships += 0.1;
+
+    // Health weights: Day (0.7) > others (0.1 each)
+    if (hasDay) health += 0.7;
+    if (hasYear) health += 0.1;
+    if (hasMonth) health += 0.1;
+    if (hasHour) health += 0.1;
+
+    // Creativity weights: Hour (0.4) > Day (0.3) > Month (0.2) > Year (0.1)
+    if (hasHour) creativity += 0.4;
+    if (hasDay) creativity += 0.3;
+    if (hasMonth) creativity += 0.2;
+    if (hasYear) creativity += 0.1;
+
+    // Normalize to ensure total = 1.0 (distribute impact across categories)
+    const total = career + wealth + relationships + health + creativity;
+    if (total > 0) {
+      const factor = 1.0 / total;
+      career *= factor;
+      wealth *= factor;
+      relationships *= factor;
+      health *= factor;
+      creativity *= factor;
+    } else {
+      // If no pillars match, distribute equally
+      career = 0.2;
+      wealth = 0.2;
+      relationships = 0.2;
+      health = 0.2;
+      creativity = 0.2;
+    }
+
+    return { career, wealth, relationships, health, creativity };
+  }
+
+  /**
+   * Get Ten God adjustments per category
+   * Traditional BaZi: Ten Gods have different meanings per category
+   */
+  private getTenGodCategoryAdjustments(tenGod: string): {
+    career: number;
+    wealth: number;
+    relationships: number;
+    health: number;
+    creativity: number;
+  } {
+    // Map library Ten God names (Pinyin) to category-specific adjustments
+    const adjustments = {
+      career: 0,
+      wealth: 0,
+      relationships: 0,
+      health: 0,
+      creativity: 0,
+    };
+
+    // Career: Direct Officer (正官) and 7 Killings (七殺) are favorable
+    // Zheng Guan = stable authority, Qi Sha = dynamic/aggressive authority
+    if (tenGod === 'Zheng Guan') {
+      adjustments.career = 6;
+      adjustments.relationships = -4; // Stable but formal
+    } else if (tenGod === 'Qi Sha') {
+      adjustments.career = 7; // Slightly more dynamic
+      adjustments.relationships = -5; // More challenging in relationships
+    }
+    // Career: Eating God (食神) and Hurting Officer (傷官) are challenging
+    // Shi Shen = gentle output, Shang Guan = rebellious output
+    else if (tenGod === 'Shi Shen') {
+      adjustments.career = -4;
+      adjustments.creativity = 6;
+    } else if (tenGod === 'Shang Guan') {
+      adjustments.career = -5; // More challenging
+      adjustments.creativity = 7; // More creative
+    }
+
+    // Wealth: Direct Wealth (正財) and Indirect Wealth (偏財) are favorable
+    // Zheng Cai = stable income, Pian Cai = speculative/opportunistic
+    if (tenGod === 'Zheng Cai') {
+      adjustments.wealth = 6;
+      adjustments.health = -4;
+    } else if (tenGod === 'Pian Cai') {
+      adjustments.wealth = 7; // Slightly more dynamic
+      adjustments.health = -5; // More draining
+    }
+    // Wealth: Rob Wealth (劫財) and Friend (比肩) are challenging
+    // Jie Cai = competitive, Bi Jian = supportive
+    else if (tenGod === 'Jie Cai') {
+      adjustments.wealth = -4;
+      adjustments.health = 5;
+    } else if (tenGod === 'Bi Jian') {
+      adjustments.wealth = -4;
+      adjustments.health = 6; // More supportive
+    }
+
+    // Relationships: Direct Resource (正印) and Indirect Resource (偏印) are favorable
+    // Zheng Yin = traditional learning, Pian Yin = unconventional knowledge
+    if (tenGod === 'Zheng Yin') {
+      adjustments.relationships = 6;
+      adjustments.creativity = -4;
+    } else if (tenGod === 'Pian Yin') {
+      adjustments.relationships = 7; // More dynamic
+      adjustments.creativity = -3; // Less restrictive on creativity
+    }
+
+    return adjustments;
+  }
+
+  /**
+   * Calculate special stars bonuses per category
+   * Traditional BaZi: each star benefits different life areas
+   *
+   * IMPORTANT: Special stars are always present in natal chart, but only ACTIVATED
+   * when today's daily branch matches the star's branch
+   */
+  private calculateSpecialStarsBonuses(
+    rawData: RawBaziData,
+    dailyAnalysis: PersonalizedDailyAnalysisOutput,
+  ): {
+    career: number;
+    wealth: number;
+    relationships: number;
+    health: number;
+    creativity: number;
+  } {
+    const bonuses = {
+      career: 0,
+      wealth: 0,
+      relationships: 0,
+      health: 0,
+      creativity: 0,
+    };
+
+    if (!rawData.specialStars) return bonuses;
+
+    // Get today's daily branch character (e.g., "子", "丑", "寅")
+    const todayBranch = dailyAnalysis.dayPillar.branchChar;
+    if (!todayBranch) return bonuses;
+
+    // Check which special stars are ACTIVATED today (daily branch matches star's branch)
+
+    // Nobleman (天乙贵人) - helpers/supporters
+    // Activated when today's branch matches any of the nobleman branches in natal chart
+    if (
+      rawData.specialStars.nobleman?.some((branch) => branch === todayBranch)
+    ) {
+      bonuses.career += 3;
+      bonuses.relationships += 4; // Nobleman helps relationships (influential people)
+      bonuses.wealth += 1; // Social connections help wealth
+    }
+
+    // Intelligence (文昌星) - academic/learning success
+    // Activated when today's branch matches the intelligence branch in natal chart
+    if (rawData.specialStars.intelligence === todayBranch) {
+      bonuses.creativity += 4;
+      bonuses.career += 2;
+    }
+
+    // Sky Horse (驿马星) - movement/travel/change
+    // Activated when today's branch matches the sky horse branch in natal chart
+    if (rawData.specialStars.skyHorse === todayBranch) {
+      bonuses.career += 3;
+      bonuses.creativity += 3;
+    }
+
+    // Peach Blossom (桃花星) - relationships/charisma
+    // Activated when today's branch matches the peach blossom branch in natal chart
+    if (rawData.specialStars.peachBlossom === todayBranch) {
+      bonuses.relationships += 4; // Peach Blossom strongly benefits relationships
+      bonuses.creativity += 2;
+      bonuses.health += 2;
+    }
+
+    return bonuses;
+  }
+
+  /**
+   * Calculate Ten God using traditional BaZi rules
+   * Used as fallback when library's calculateTenGod returns null
+   * 
+   * The library returns null when:
+   * 1. Same stem value (handled separately)
+   * 2. No relationship found (shouldn't happen for valid elements, but we handle it)
+   * 
+   * Traditional BaZi Ten God calculation (matches library logic):
+   * - Same element: Bi Jian (same Yin/Yang) or Jie Cai (different Yin/Yang)
+   * - Other produces Day Master: Zheng Yin (different) or Pian Yin (same)
+   * - Other controls Day Master: Zheng Guan (different) or Qi Sha (same)
+   * - Day Master produces other: Shi Shen (different) or Shang Guan (same)
+   * - Day Master controls other: Zheng Cai (different) or Pian Cai (same)
+   */
+  private calculateTenGodTraditional(
+    dayMasterStem: { elementType: string; yinYang: string; value: number },
+    otherStem: { elementType: string; yinYang: string; value: number },
+  ): string {
+    // Same element = Companion relationship
+    if (dayMasterStem.elementType === otherStem.elementType) {
+      return dayMasterStem.yinYang === otherStem.yinYang ? 'Bi Jian' : 'Jie Cai';
+    }
+
+    // Element cycle: Wood → Fire → Earth → Metal → Water → Wood
+    const elementCycle: Record<string, string> = {
+      WOOD: 'FIRE',
+      FIRE: 'EARTH',
+      EARTH: 'METAL',
+      METAL: 'WATER',
+      WATER: 'WOOD',
+    };
+
+    // Control cycle: Wood controls Earth, Earth controls Water, Water controls Fire, Fire controls Metal, Metal controls Wood
+    const controlCycle: Record<string, string> = {
+      WOOD: 'EARTH',
+      EARTH: 'WATER',
+      WATER: 'FIRE',
+      FIRE: 'METAL',
+      METAL: 'WOOD',
+    };
+
+    const sameYinYang = dayMasterStem.yinYang === otherStem.yinYang;
+
+    // Check if other stem produces Day Master
+    if (elementCycle[otherStem.elementType] === dayMasterStem.elementType) {
+      return sameYinYang ? 'Pian Yin' : 'Zheng Yin';
+    }
+
+    // Check if other stem controls Day Master
+    if (controlCycle[otherStem.elementType] === dayMasterStem.elementType) {
+      return sameYinYang ? 'Qi Sha' : 'Zheng Guan';
+    }
+
+    // Check if Day Master produces other stem
+    if (elementCycle[dayMasterStem.elementType] === otherStem.elementType) {
+      return sameYinYang ? 'Shang Guan' : 'Shi Shen';
+    }
+
+    // Check if Day Master controls other stem
+    if (controlCycle[dayMasterStem.elementType] === otherStem.elementType) {
+      return sameYinYang ? 'Pian Cai' : 'Zheng Cai';
+    }
+
+    // Fallback (shouldn't happen, but safety)
+    return 'Bi Jian';
+  }
+
+  /**
+   * Calculate rarity for TrinityCombo based on ACTUAL trinity combo detected today
+   * Trinity groups: 申子辰 (Water), 寅午戌 (Fire), 亥卯未 (Wood), 巳酉丑 (Metal)
+   * 
+   * IMPORTANT: Rarity is based on how often the specific missing branch appears
+   * in daily/monthly/annual pillars, not theoretical probability.
+   */
+  private calculateTrinityComboRarity(
+    natalBranches: string[],
+    trinityCombo?: { participants?: Array<{ branch?: string; source?: string; pillar?: string }> },
+  ): string {
+    const trinityGroups = [
+      ['申', '子', '辰'], // Shen-Zi-Chen (Water)
+      ['寅', '午', '戌'], // Yin-Wu-Xu (Fire)
+      ['亥', '卯', '未'], // Hai-Mao-Wei (Wood)
+      ['巳', '酉', '丑'], // Si-You-Chou (Metal)
+    ];
+
+    // If we have the actual trinity combo, calculate based on what actually happened
+    if (trinityCombo?.participants) {
+      const participantBranches = trinityCombo.participants
+        .map(p => p.branch)
+        .filter(Boolean) as string[];
+      
+      // Find which trinity group this belongs to
+      const matchingGroup = trinityGroups.find(group => 
+        participantBranches.every(branch => group.includes(branch)) &&
+        participantBranches.length >= 3
+      );
+
+      if (matchingGroup) {
+        // Count how many branches came from natal vs transit
+        const natalCount = trinityCombo.participants.filter(
+          p => p.source === 'Natal'
+        ).length;
+        const transitParticipants = trinityCombo.participants.filter(
+          p => p.source === 'Daily' || p.source === 'Monthly' || p.source === 'Annual'
+        );
+        const transitCount = transitParticipants.length;
+
+        this.logger.log(`🔍 TrinityCombo Rarity Debug: Actual trinity detected with ${natalCount} natal + ${transitCount} transit branches`);
+        
+        // Determine which transit pillar(s) complete the trinity
+        const hasDaily = transitParticipants.some(p => p.source === 'Daily');
+        const hasMonthly = transitParticipants.some(p => p.source === 'Monthly');
+        const hasAnnual = transitParticipants.some(p => p.source === 'Annual');
+        
+        this.logger.log(`🔍 TrinityCombo Rarity Debug: Transit sources - Daily: ${hasDaily}, Monthly: ${hasMonthly}, Annual: ${hasAnnual}`);
+
+        // Calculate rarity based on which pillar completes it:
+        // - Daily pillar: cycles every 12 days → "1 in 12 days"
+        // - Monthly pillar: cycles every 12 months (~365 days) → "1 in 12 months" ≈ "1 in 365 days"
+        // - Annual pillar: cycles every 12 years (~4380 days) → "1 in 12 years" ≈ "1 in 4380 days"
+        // If multiple pillars complete it, use the most frequent (daily)
+        
+        if (hasDaily) {
+          // Daily pillar completes it - most frequent
+          return '1 in 12 days';
+        } else if (hasMonthly) {
+          // Monthly pillar completes it - rarer
+          return '1 in 12 months';
+        } else if (hasAnnual) {
+          // Annual pillar completes it - very rare
+          return '1 in 12 years';
+        } else {
+          // Fallback (shouldn't happen if transitCount > 0)
+          return '1 in 12 days';
+        }
+      }
+    }
+
+    // Fallback: theoretical calculation based on natal chart
+    // Count how many trinity groups the user can complete (has 2 branches from)
+    let completableGroups = 0;
+    const groupDetails: string[] = [];
+    
+    for (let i = 0; i < trinityGroups.length; i++) {
+      const group = trinityGroups[i];
+      const userBranchesInGroup = group.filter((branch) =>
+        natalBranches.includes(branch),
+      );
+      const groupName = ['Water', 'Fire', 'Wood', 'Metal'][i];
+      groupDetails.push(`${groupName} trinity: user has ${userBranchesInGroup.length}/3 branches (${userBranchesInGroup.join(', ') || 'none'})`);
+      
+      if (userBranchesInGroup.length >= 2) {
+        completableGroups++;
+      }
+    }
+
+    this.logger.log(`🔍 TrinityCombo Rarity Debug: ${groupDetails.join('; ')}`);
+    this.logger.log(`🔍 TrinityCombo Rarity Debug: Completable groups: ${completableGroups}`);
+
+    if (completableGroups === 0) {
+      this.logger.log(`🔍 TrinityCombo Rarity Debug: User can't form trinity - returning 'Never'`);
+      return 'Never'; // User can't form trinity
+    }
+
+    // Theoretical: Each completable group has 1 branch that completes it
+    // The missing branch appears in daily pillar 1 in 12 days
+    // But we also have monthly (1 in 12 months) and annual (1 in 12 years) chances
+    // For daily forecast, we use the most frequent: 1 in 12 days
+    const daysPerOccurrence = Math.round(12 / completableGroups);
+    const rarity = `1 in ${daysPerOccurrence} days`;
+    this.logger.log(`🔍 TrinityCombo Rarity Debug: Calculated rarity (theoretical): ${rarity}`);
+    return rarity;
+  }
+
+  /**
+   * Calculate rarity for DirectionalCombo based on ACTUAL combo detected today
+   * Directional groups: 寅卯辰巳 (East), 申酉戌亥 (West), 巳午未申 (South), 亥子丑寅 (North)
+   * 
+   * IMPORTANT: Rarity is based on how often the specific missing branch appears
+   * in daily/monthly/annual pillars, not theoretical probability.
+   */
+  private calculateDirectionalComboRarity(
+    natalBranches: string[],
+    directionalCombo?: { participants?: Array<{ branch?: string; source?: string; pillar?: string }> },
+  ): string {
+    const directionalGroups = [
+      ['寅', '卯', '辰', '巳'], // East
+      ['申', '酉', '戌', '亥'], // West
+      ['巳', '午', '未', '申'], // South
+      ['亥', '子', '丑', '寅'], // North
+    ];
+
+    // If we have the actual directional combo, calculate based on what actually happened
+    if (directionalCombo?.participants) {
+      const participantBranches = directionalCombo.participants
+        .map(p => p.branch)
+        .filter(Boolean) as string[];
+      
+      // Find which directional group this belongs to
+      const matchingGroup = directionalGroups.find(group => 
+        participantBranches.every(branch => group.includes(branch)) &&
+        participantBranches.length >= 4
+      );
+
+      if (matchingGroup) {
+        // Count how many branches came from natal vs transit
+        const natalCount = directionalCombo.participants.filter(
+          p => p.source === 'Natal'
+        ).length;
+        const transitParticipants = directionalCombo.participants.filter(
+          p => p.source === 'Daily' || p.source === 'Monthly' || p.source === 'Annual'
+        );
+        const transitCount = transitParticipants.length;
+
+        this.logger.log(`🔍 DirectionalCombo Rarity Debug: Actual combo detected with ${natalCount} natal + ${transitCount} transit branches`);
+        
+        // Determine which transit pillar(s) complete the combo
+        const hasDaily = transitParticipants.some(p => p.source === 'Daily');
+        const hasMonthly = transitParticipants.some(p => p.source === 'Monthly');
+        const hasAnnual = transitParticipants.some(p => p.source === 'Annual');
+        
+        this.logger.log(`🔍 DirectionalCombo Rarity Debug: Transit sources - Daily: ${hasDaily}, Monthly: ${hasMonthly}, Annual: ${hasAnnual}`);
+
+        // Calculate rarity based on which pillar completes it:
+        // - Daily pillar: cycles every 12 days → "1 in 12 days"
+        // - Monthly pillar: cycles every 12 months (~365 days) → "1 in 12 months"
+        // - Annual pillar: cycles every 12 years (~4380 days) → "1 in 12 years"
+        // If multiple pillars complete it, use the most frequent (daily)
+        
+        if (hasDaily) {
+          return '1 in 12 days';
+        } else if (hasMonthly) {
+          return '1 in 12 months';
+        } else if (hasAnnual) {
+          return '1 in 12 years';
+        } else {
+          // Fallback (shouldn't happen if transitCount > 0)
+          return '1 in 12 days';
+        }
+      }
+    }
+
+    // Fallback: theoretical calculation based on natal chart
+    // Count how many directional groups the user can complete (has 3 branches from)
+    let completableGroups = 0;
+    for (const group of directionalGroups) {
+      const userBranchesInGroup = group.filter((branch) =>
+        natalBranches.includes(branch),
+      );
+      if (userBranchesInGroup.length >= 3) {
+        completableGroups++;
+      }
+    }
+
+    if (completableGroups === 0) {
+      return 'Never'; // User can't form directional combo
+    }
+
+    // Theoretical: Each completable group has 1 branch that completes it
+    // The missing branch appears in daily pillar 1 in 12 days
+    // But we also have monthly (1 in 12 months) and annual (1 in 12 years) chances
+    // For daily forecast, we use the most frequent: 1 in 12 days
+    const daysPerOccurrence = Math.round(12 / completableGroups);
+    return `1 in ${daysPerOccurrence} days`;
+  }
+
+  /**
+   * Extract special patterns and star activations for today
+   * Returns patterns with title, description, rarity, and emoji
+   */
+  extractSpecialPatterns(
+    rawData: RawBaziData,
+    dailyAnalysis: PersonalizedDailyAnalysisOutput,
+  ): Array<{
+    title: string;
+    description: string;
+    rarity: string;
+    emoji: string;
+  }> {
+    const patterns: Array<{
+      title: string;
+      description: string;
+      rarity: string;
+      emoji: string;
+    }> = [];
+
+    if (!rawData.specialStars || !dailyAnalysis.dayPillar?.branchChar) {
+      return patterns;
+    }
+
+    const todayBranch = dailyAnalysis.dayPillar.branchChar;
+
+    // Get natal branches for rarity calculations
+    const natalBranches = [
+      rawData.natalStructure.social.branch,
+      rawData.natalStructure.career.branch,
+      rawData.natalStructure.personal.branch,
+      rawData.natalStructure.innovation?.branch,
+    ].filter((b): b is string => b !== null && b !== undefined);
+
+    // 1. Special Stars Activations (when today's branch matches star's branch)
+    // These stars are always present in natal chart, but only ACTIVE when branch matches
+    // NOTE: todayBranch comes from dailyAnalysis.dayPillar.branchChar (daily pillar)
+    // Daily pillar cycles every 12 days, so "1 in 12 days" is accurate for single-branch stars
+    // For Nobleman (can have multiple branches), rarity = 12 / branchCount
+
+    // Nobleman (天乙贵人) - can have multiple branches
+    // Note: This star is always present in your natal chart, but only ACTIVE when today's branch matches
+    if (rawData.specialStars.nobleman?.includes(todayBranch)) {
+      const branchCount = rawData.specialStars.nobleman.length;
+      // If user has multiple Nobleman branches, activation is more frequent
+      const rarity = branchCount > 0 ? `1 in ${Math.round(12 / branchCount)} days` : '1 in 12 days';
+      patterns.push({
+        title: 'Noble Person Star Active',
+        description:
+          'Your Noble Person star (always present in your chart) is activated today. Expect helpful people, mentors, or influential supporters to appear. This is an excellent day for networking, seeking guidance, or connecting with authority figures.',
+        rarity,
+        emoji: '👑',
+      });
+    }
+
+    // Intelligence (文昌星)
+    // Note: This star is always present in your natal chart, but only ACTIVE when today's branch matches
+    if (rawData.specialStars.intelligence === todayBranch) {
+      patterns.push({
+        title: 'Academic Star Active',
+        description:
+          'Your Academic Star (always present in your chart) is activated today. This is an ideal day for learning, studying, writing, or intellectual pursuits. Your memory and comprehension are enhanced, making it perfect for exams, presentations, or complex problem-solving.',
+        rarity: '1 in 12 days',
+        emoji: '📚',
+      });
+    }
+
+    // Sky Horse (驿马星)
+    // Note: This star is always present in your natal chart, but only ACTIVE when today's branch matches
+    if (rawData.specialStars.skyHorse === todayBranch) {
+      patterns.push({
+        title: 'Travel Destiny Star Active',
+        description:
+          'Your Travel Destiny star (always present in your chart) is activated today. Movement, change, and exploration are favored. This could manifest as travel, relocation, career changes, or simply embracing new environments. Avoid staying stagnant—action and movement bring opportunities.',
+        rarity: '1 in 12 days',
+        emoji: '🏇',
+      });
+    }
+
+    // Peach Blossom (桃花星)
+    // Note: This star is always present in your natal chart, but only ACTIVE when today's branch matches
+    if (rawData.specialStars.peachBlossom === todayBranch) {
+      patterns.push({
+        title: 'Romance Magnetism Star Active',
+        description:
+          'Your Romance Magnetism star (always present in your chart) is activated today. Your charisma and social appeal are heightened, making this an excellent day for relationships, social events, or careers requiring charm. People are naturally drawn to you today.',
+        rarity: '1 in 12 days',
+        emoji: '🌸',
+      });
+    }
+
+    // 2. Rare Interaction Patterns
+    // Only show truly rare patterns - common interactions (Branch6Combo, StemCombination, BranchClash, StemClash)
+    // happen too frequently (multiple times per month) to be considered "special patterns"
+    const allInteractions = dailyAnalysis.interactions || [];
+
+    // CRITICAL: Filter to only interactions involving TODAY's energy (Daily, Monthly, Annual)
+    // Natal-Natal interactions are permanent patterns, not "special for today"
+    // For special patterns, we only care about interactions that involve today's transit energy
+    const todayInteractions = allInteractions.filter((int) => {
+      const hasTransitParticipant = int.participants?.some(
+        (p) => p.source === 'Daily' || p.source === 'Monthly' || p.source === 'Annual',
+      );
+      return hasTransitParticipant;
+    });
+
+    // Debug: Log all interaction types
+    const allInteractionTypes = allInteractions.map(int => int.type);
+    const todayInteractionTypes = todayInteractions.map(int => int.type);
+    this.logger.log(`🔍 Special Patterns Debug: Found ${allInteractions.length} total interactions: ${allInteractionTypes.join(', ')}`);
+    this.logger.log(`🔍 Special Patterns Debug: Filtered to ${todayInteractions.length} interactions involving today's energy: ${todayInteractionTypes.join(', ')}`);
+    this.logger.log(`🔍 Special Patterns Debug: Natal branches: ${natalBranches.join(', ')}`);
+    this.logger.log(`🔍 Special Patterns Debug: Today's branch: ${todayBranch}`);
+
+    // TrinityCombo (三合) - Very rare, requires 3 specific branches
+    // IMPORTANT: A true TrinityCombo requires exactly 3 branches from the same trinity group
+    // AND must involve today's energy (not just natal-natal)
+    const trinityCombos = todayInteractions.filter((int) => int.type === 'TrinityCombo');
+    
+    // Find a valid TrinityCombo (must have 3+ participants to form a true trinity)
+    const validTrinityCombo = trinityCombos.find((int) => {
+      const participantCount = int.participants?.length || 0;
+      // A true TrinityCombo needs at least 3 branches (can be natal + transit combinations)
+      return participantCount >= 3;
+    });
+    
+    if (trinityCombos.length > 0) {
+      this.logger.log(`🔍 Special Patterns Debug: Found ${trinityCombos.length} TrinityCombo interactions involving today's energy`);
+      trinityCombos.forEach((tc, idx) => {
+        const participants = tc.participants?.map(p => `${p.pillar}(${p.source})`) || [];
+        this.logger.log(`🔍 Special Patterns Debug: TrinityCombo ${idx + 1}: ${participants.length} participants - ${participants.join(', ')}`);
+      });
+    }
+    
+    if (validTrinityCombo) {
+      this.logger.log(`🔍 Special Patterns Debug: Valid TrinityCombo found with ${validTrinityCombo.participants?.length} participants`);
+      // Pass the actual trinity combo to calculate accurate rarity
+      const rarity = this.calculateTrinityComboRarity(natalBranches, validTrinityCombo);
+      this.logger.log(`🔍 Special Patterns Debug: Calculated rarity: ${rarity}`);
+      if (rarity !== 'Never') {
+        patterns.push({
+          title: 'Trinity Harmony Day',
+          description:
+            'Three powerful forces align today, creating exceptional synergy and transformation. This rare cosmic pattern brings unified strength and elemental harmony. Major opportunities for breakthrough and significant progress.',
+          rarity,
+          emoji: '✨',
+        });
+      } else {
+        this.logger.warn(`⚠️ Valid TrinityCombo detected but rarity is 'Never' - this shouldn't happen!`);
+      }
+    } else if (trinityCombos.length > 0) {
+      this.logger.warn(`⚠️ Found ${trinityCombos.length} TrinityCombo interactions involving today, but none have 3+ participants. These are likely false positives (partial trinities).`);
+    } else {
+      this.logger.log(`🔍 Special Patterns Debug: No TrinityCombo found in interactions involving today's energy`);
+    }
+
+    // DirectionalCombo (方合) - Rare, seasonal alignment
+    // Only consider interactions involving today's energy
+    // IMPORTANT: A true DirectionalCombo requires exactly 4 branches from the same directional group
+    const directionalCombos = todayInteractions.filter((int) => int.type === 'DirectionalCombo');
+    
+    // Find a valid DirectionalCombo (must have 4+ participants to form a true directional combo)
+    const validDirectionalCombo = directionalCombos.find((int) => {
+      const participantCount = int.participants?.length || 0;
+      // A true DirectionalCombo needs at least 4 branches (can be natal + transit combinations)
+      return participantCount >= 4;
+    });
+    
+    if (directionalCombos.length > 0) {
+      this.logger.log(`🔍 Special Patterns Debug: Found ${directionalCombos.length} DirectionalCombo interactions involving today's energy`);
+      directionalCombos.forEach((dc, idx) => {
+        const participants = dc.participants?.map(p => `${p.pillar}(${p.source})`) || [];
+        this.logger.log(`🔍 Special Patterns Debug: DirectionalCombo ${idx + 1}: ${participants.length} participants - ${participants.join(', ')}`);
+      });
+    }
+    
+    if (validDirectionalCombo) {
+      this.logger.log(`🔍 Special Patterns Debug: Valid DirectionalCombo found with ${validDirectionalCombo.participants?.length} participants`);
+      // Pass the actual directional combo to calculate accurate rarity
+      const rarity = this.calculateDirectionalComboRarity(natalBranches, validDirectionalCombo);
+      this.logger.log(`🔍 Special Patterns Debug: Calculated rarity: ${rarity}`);
+      if (rarity !== 'Never') {
+        patterns.push({
+          title: 'Seasonal Alignment Day',
+          description:
+            'The four directions align today, bringing environmental support and natural flow. This rare pattern indicates favorable timing and alignment with cosmic rhythms. Trust the natural flow and timing of events.',
+          rarity,
+          emoji: '🌐',
+        });
+      }
+    } else if (directionalCombos.length > 0) {
+      this.logger.warn(`⚠️ Found ${directionalCombos.length} DirectionalCombo interactions involving today, but none have 4+ participants. These are likely false positives (partial combos).`);
+    }
+
+    // 3. Multiple Simultaneous Activations (rare combinations)
+
+    // Count activated special stars
+    const activatedStarsCount =
+      (rawData.specialStars.nobleman?.includes(todayBranch) ? 1 : 0) +
+      (rawData.specialStars.intelligence === todayBranch ? 1 : 0) +
+      (rawData.specialStars.skyHorse === todayBranch ? 1 : 0) +
+      (rawData.specialStars.peachBlossom === todayBranch ? 1 : 0);
+
+    // Multiple special stars activated (truly rare)
+    if (activatedStarsCount >= 2) {
+      // Calculate: if 2 stars activate, probability = (star1_rarity) * (star2_rarity)
+      // Each star is 1 in 12 days, so 2 stars = 1 in 144 days
+      // 3 stars = 1 in 1728 days, 4 stars = 1 in 20736 days
+      const daysPerOccurrence =
+        activatedStarsCount === 2
+          ? 144
+          : activatedStarsCount === 3
+            ? 1728
+            : 20736;
+      const rarityText =
+        daysPerOccurrence >= 365
+          ? `1 in ${Math.round(daysPerOccurrence / 365)} years`
+          : `1 in ${daysPerOccurrence} days`;
+      patterns.push({
+        title: 'Double Star Activation',
+        description:
+          'Multiple special stars are activated simultaneously today, amplifying their combined influence. This rare alignment creates exceptional opportunities. The combined power of these stars makes this a particularly significant day.',
+        rarity: rarityText,
+        emoji: '⭐',
+      });
+    }
+
+    // Special star + rare interaction combination (extremely rare)
+    // Use validTrinityCombo or validDirectionalCombo (already filtered)
+    if (activatedStarsCount >= 1 && (validTrinityCombo || validDirectionalCombo)) {
+      const interactionRarity = validTrinityCombo
+        ? this.calculateTrinityComboRarity(natalBranches, validTrinityCombo)
+        : validDirectionalCombo
+          ? this.calculateDirectionalComboRarity(natalBranches, validDirectionalCombo)
+          : null;
+
+      if (interactionRarity && interactionRarity !== 'Never') {
+        // Extract days from interaction rarity (e.g., "1 in 12 days" -> 12)
+        const interactionDays = parseInt(interactionRarity.match(/\d+/)?.[0] || '12');
+        // Star activation is 1 in 12 days
+        const combinedDays = 12 * interactionDays;
+        const rarityText =
+          combinedDays >= 365
+            ? `1 in ${Math.round(combinedDays / 365)} years`
+            : `1 in ${combinedDays} days`;
+        patterns.push({
+          title: 'Cosmic Convergence',
+          description:
+            'A special star activates alongside a rare cosmic pattern today, creating an exceptional alignment. This combination is extremely rare and indicates a day of significant potential. Major opportunities or transformations may occur.',
+          rarity: rarityText,
+          emoji: '🌟',
+        });
+      }
+    }
+    
+    // Debug: Log final patterns
+    this.logger.log(`🔍 Special Patterns Debug: Final patterns count: ${patterns.length}`);
+    patterns.forEach((p, idx) => {
+      this.logger.log(`🔍 Special Patterns Debug: Pattern ${idx + 1}: ${p.title} (${p.rarity})`);
+    });
+
+    // Sort by rarity (most rare first) - parse rarity strings to compare
+    patterns.sort((a, b) => {
+      const aDays = this.parseRarityToDays(a.rarity);
+      const bDays = this.parseRarityToDays(b.rarity);
+      return aDays - bDays; // Lower days = more rare
+    });
+
+    // Limit to top 3 most significant patterns (or all if less than 3)
+    return patterns.slice(0, 3);
+  }
+
+  /**
+   * Parse rarity string to days for sorting
+   * "1 in 12 days" -> 12
+   * "1 in 2 years" -> 730
+   */
+  private parseRarityToDays(rarity: string): number {
+    const daysMatch = rarity.match(/1 in (\d+) days/);
+    if (daysMatch) {
+      return parseInt(daysMatch[1]);
+    }
+    const yearsMatch = rarity.match(/1 in (\d+) years/);
+    if (yearsMatch) {
+      return parseInt(yearsMatch[1]) * 365;
+    }
+    return 999999; // Unknown rarity = least rare
   }
 }

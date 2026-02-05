@@ -9,10 +9,49 @@
 * 🟢 You can import this file directly.
 */
 
+export const Platform = {
+  google: 'google',
+  apple: 'apple'
+} as const
+
+export type Platform = (typeof Platform)[keyof typeof Platform]
+
+
+export const FriendRelationShip = {
+  friend: 'friend',
+  family: 'family',
+  romantic: 'romantic',
+  colleague: 'colleague',
+  other: 'other'
+} as const
+
+export type FriendRelationShip = (typeof FriendRelationShip)[keyof typeof FriendRelationShip]
+
+
+export const QuestionType = {
+  personal: 'personal',
+  compatibility: 'compatibility',
+  daily: 'daily'
+} as const
+
+export type QuestionType = (typeof QuestionType)[keyof typeof QuestionType]
+
+
+export const QuestionStatus = {
+  pending: 'pending',
+  in_progress: 'in_progress',
+  completed: 'completed',
+  failed: 'failed'
+} as const
+
+export type QuestionStatus = (typeof QuestionStatus)[keyof typeof QuestionStatus]
+
+
 export const ReportType = {
   personal: 'personal',
   compatibility: 'compatibility',
-  forecast: 'forecast'
+  forecast: 'forecast',
+  forecast_14day: 'forecast_14day'
 } as const
 
 export type ReportType = (typeof ReportType)[keyof typeof ReportType]
@@ -26,3 +65,34 @@ export const ReportStatus = {
 } as const
 
 export type ReportStatus = (typeof ReportStatus)[keyof typeof ReportStatus]
+
+
+export const SubscriptionStatus = {
+  active: 'active',
+  inactive: 'inactive',
+  expired: 'expired'
+} as const
+
+export type SubscriptionStatus = (typeof SubscriptionStatus)[keyof typeof SubscriptionStatus]
+
+
+export const SubscriptionTier = {
+  pro: 'pro'
+} as const
+
+export type SubscriptionTier = (typeof SubscriptionTier)[keyof typeof SubscriptionTier]
+
+
+export const TokenType = {
+  refresh: 'refresh'
+} as const
+
+export type TokenType = (typeof TokenType)[keyof typeof TokenType]
+
+
+export const Gender = {
+  male: 'male',
+  female: 'female'
+} as const
+
+export type Gender = (typeof Gender)[keyof typeof Gender]

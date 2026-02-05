@@ -1,0 +1,17 @@
+model Account {
+    id            String         @id @default(uuid())
+    platform      Platform
+    email         String
+    userIds       String[]
+    users         User[]
+    subscriptions Subscription[]
+    createdAt     DateTime       @default(now())
+    updatedAt     DateTime       @updatedAt
+
+    @@unique([platform, email])
+}
+
+enum Platform {
+    google
+    apple
+}

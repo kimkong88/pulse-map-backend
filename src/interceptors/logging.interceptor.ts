@@ -20,9 +20,14 @@ export class LoggingInterceptor implements NestInterceptor {
     const response = context.switchToHttp().getResponse<Response>();
     const startTime = Date.now();
 
+    // Log incoming request immediately (before guards/pipes)
+    this.logger.log(
+      `→ ${request.method} ${request.url} ${request.headers['authorization'] ? '[Auth]' : '[No Auth]'}`,
+    );
+
     return next.handle().pipe(
       tap({
-        next: data => {
+        next: (data) => {
           const endTime = Date.now();
           const duration = endTime - startTime;
 
@@ -32,14 +37,17 @@ export class LoggingInterceptor implements NestInterceptor {
             } - ${duration}ms`,
           );
         },
-        error: error => {
+        error: (error) => {
           const endTime = Date.now();
           const duration = endTime - startTime;
 
           this.logger.error(
-            `❌ ${request.method} ${request.url} - ${error.status ||
-              500} - ${duration}ms - ${error.message}`,
+            `❌ ${request.method} ${request.url} - ${
+              error.status || 500
+            } - ${duration}ms - ${error.message}`,
           );
+          this.logger.error(error);
+          this.logger.error(error.stack);
         },
       }),
     );

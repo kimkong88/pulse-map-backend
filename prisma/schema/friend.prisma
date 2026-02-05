@@ -1,0 +1,18 @@
+model Friend {
+    id           String             @id @default(uuid())
+    userId       String
+    user         User               @relation(fields: [userId], references: [id], name: "userFriend")
+    friendUserId String
+    relationship FriendRelationShip
+    friend       User               @relation(fields: [friendUserId], references: [id], name: "friendUser")
+    createdAt    DateTime           @default(now())
+    updatedAt    DateTime           @updatedAt
+}
+
+enum FriendRelationShip {
+    friend
+    family
+    romantic
+    colleague
+    other
+}
